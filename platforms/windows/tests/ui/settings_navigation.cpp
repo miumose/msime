@@ -2,7 +2,6 @@
 #include "../../settings/SettingsNavIcons.h"
 #include "../../settings/SettingsNavigation.h"
 #include "ShellSurfaces.h"
-#include "../../panels/win7/PanelRoutes.h"
 #include <array>
 #include <cstdio>
 #include <set>
@@ -104,7 +103,6 @@ int main() {
               std::vector<std::wstring>{L"MSIME.exe"});
       require(msime::windows::shell_executable_names(request, msime::windows::PanelHost::Native) ==
               std::vector<std::wstring>{L"msime-client-panels.exe"});
-      require(msime::windows::win7::panel_route(target.panel));
     }
     // 剪贴板页在本窗口里原生绘制，只有云剪贴板面板仍由共享应用打开。
     require(msime::windows::shell_route_argument(

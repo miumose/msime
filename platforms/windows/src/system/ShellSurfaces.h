@@ -99,7 +99,7 @@ inline std::string shell_surface_route(const ShellSurfaceRequest &request) {
   return request.panel;
 }
 
-// 现代 Windows 包里承载面板的进程。Shared 是 Tauri/WebView2 的 MSIME.exe，Native 是由 panels/win7 同一份源码编出的 msime-client-panels.exe；全部界面改为原生的迁移期间两者都随包安装，缺省仍是 Shared。
+// 面板宿主的历史取值；本 fork 不带面板宿主，保留解析只为让旧的 MSIME_WINDOWS_PANEL_HOST 环境变量不报错。
 enum class PanelHost { Shared, Native };
 // 选择面板宿主的环境变量。Server 启动时读一次，设置窗口每次打开面板时读；值是 native（不分大小写）才选原生宿主，没设、为空或任何别的值都按 Shared，拼错不会让面板消失。
 inline constexpr wchar_t panel_host_variable[] = L"MSIME_WINDOWS_PANEL_HOST";
