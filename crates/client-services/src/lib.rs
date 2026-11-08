@@ -13,26 +13,8 @@ use msime_client_base::text::{
 use msime_client_base::{bounded_io, calendar, file_lock, storage, text};
 use msime_client_core::{cloud, edition, endpoint, helpcode, host_surface, preferences, theme};
 
-pub mod account;
-/// 自建云剪贴板中继的客户端：自己联网，所以不在只做 sans-IO 的 `cloud` 下面。
-pub mod clipboard_relay;
-/// 云剪贴板的 WebDAV 后端：在本机扮演中继，读写用户网盘上的事件日志。
-pub mod clipboard_webdav;
 pub mod common_phrases;
-pub mod community;
-pub mod diagnostics;
 pub mod dictionary;
-/// 「我的词条」经用户的 WebDAV 网盘同步：把 `cloud::dictionary_sync` 的协议核心接到网盘上，密钥串是云剪贴板端到端加密的另一个实例。
-pub mod dictionary_webdav;
-/// 输入法进程里的「我的词条」网盘自动同步：个人词库文件变了、或者到了下一次该同步的时间，就在后台线程上调 `dictionary_webdav`。
-pub mod dictionary_webdav_scheduler;
 /// 先于登记到达的取消，流式对话和 AI 皮肤的请求登记表共用。
 mod early_cancels;
-pub mod notices;
-pub mod plugins;
 pub mod proxy;
-pub mod skin;
-pub mod telemetry;
-pub mod typing_statistics;
-pub mod update_check;
-pub mod vocabulary;
