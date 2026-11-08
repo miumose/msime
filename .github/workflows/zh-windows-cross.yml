@@ -1,0 +1,56 @@
+name: zh windows cross build
+
+# Temporary verification workflow for the Chinese-only fork: builds the
+# Windows GNU host DLL, the TSF DLL, the Server and the native tests on a
+# Linux runner the same way ci-platforms.yml does, without Depot runners.
+on:
+  workflow_dispatch:
+  push:
+    branches: [zh-only]
+
+permissions:
+  contents: read
+
+jobs:
+  cross:
+    name: Windows GNU cross build (pinyin edition)
+    runs-on: ubuntu-24.04
+    container: debian:trixie-slim
+    timeout-minutes: 360
+    steps:
+      - name: Install MinGW cross toolchain
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends g++-mingw-w64-x86-64 build-essential cmake ninja-build pkg-config curl ca-certificates git zip unzip tar python3
+          # The unsuffixed compiler defaults to the win32 thread model, whose C++ library has no std::thread.
+          update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache vcpkg and cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/tooling/vcpkg
+            target/windows-native-deps
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: zh-cross-${{ hashFiles('platforms/windows/vcpkg.json') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            zh-cross-${{ hashFiles('platforms/windows/vcpkg.json') }}-
+
+      - name: Prepare MinGW header aliases
+        run: |
+          python3 platforms/windows/cross/add-header-aliases.py \
+            /usr/share/mingw-w64/include /usr/x86_64-w64-mingw32/include
+
+      - name: Build
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          rustup toolchain install
+          bash platforms/windows/build-cross.sh x64 pinyin

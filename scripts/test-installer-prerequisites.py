@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The Windows installer must say what is missing before it installs.
 
-Neither the WebView2 Runtime nor the Visual C++ redistributable ships in the
-package: the first has its own evergreen update channel, the second is a
-system-wide shared component. Without either one the input method is broken
-*after* a successful install — the Server will not start, or the settings
-window opens onto nothing — and the user has no way to know why.
+This build has no WebView interface: the settings window and every panel are
+native, so the WebView2 Runtime is no longer a prerequisite. The Visual C++
+redistributable still is: it is a system-wide shared component the package does
+not ship, and without it the Server cannot start *after* a successful install,
+with nothing on screen explaining why.
 
 The check lives in Inno Setup's Pascal Script, which nothing on a non-Windows
 host can compile. So this pins the parts that are easy to get wrong and that a
@@ -54,8 +54,8 @@ def strip_pascal_comments(code: str) -> str:
 
 
 def prerequisite_code(script: str) -> str:
-    """From `function ReadWebView2Version` to the `end;` closing `InitializeSetup`, comments removed; empty if either end is missing."""
-    start = script.find("function ReadWebView2Version")
+    """From `function VCRuntimeInstalledInView` to the `end;` closing `InitializeSetup`, comments removed; empty if either end is missing."""
+    start = script.find("function VCRuntimeInstalledInView")
     setup = script.find("function InitializeSetup: Boolean;", max(start, 0))
     if start < 0 or setup < 0:
         return ""
@@ -82,8 +82,7 @@ def main() -> int:
     require("function InitializeSetup: Boolean;" in script,
             "no InitializeSetup: nothing runs before the first wizard page")
     code = prerequisite_code(script)
-    require(code != "", "no ReadWebView2Version ... InitializeSetup block to check")
-    webview = routine(code, "ReadWebView2Version")
+    require(code != "", "no VCRuntimeInstalledInView ... InitializeSetup block to check")
     view = routine(code, "VCRuntimeInstalledInView")
     installed = routine(code, "VCRuntimeIsInstalled")
     setup = routine(code, "InitializeSetup")
@@ -94,19 +93,16 @@ def main() -> int:
     # unequipped. Both registry views are named explicitly instead.
     require("Software\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64" in script,
             "VC runtime is not read from its x64 registry key")
-    require("EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" in script,
-            "WebView2 is not read from the EdgeUpdate client key")
     require(re.search(r"FileExists\([^)]*vcruntime", script, re.I) is None,
             "VC runtime probed through the filesystem, which WOW64 redirects")
     for root in ("HKLM32", "HKLM64"):
-        require(re.search(rf"RegQueryStringValue\(\s*{root}\s*,\s*WebView2ClientKey\s*,\s*'pv'", webview) is not None,
-                f"ReadWebView2Version does not read WebView2's pv from the {root} view")
         require(re.search(rf"VCRuntimeInstalledInView\(\s*{root}\s*\)", installed) is not None,
                 f"VCRuntimeIsInstalled does not consult the {root} view")
-    require(re.search(r"\bReadWebView2Version\b", setup) is not None,
-            "InitializeSetup does not read the WebView2 version")
     require(re.search(r"\bVCRuntimeIsInstalled\b", setup) is not None,
             "InitializeSetup does not check the VC runtime")
+    # 这个产品不带 WebView 界面：安装不得再要求 WebView2 Runtime。
+    require("WebView2" not in setup,
+            "InitializeSetup still mentions the WebView2 Runtime")
 
     # Installed=1 is true on a machine with only the 2015/2017 redistributable,
     # which lacks vcruntime140_1.dll and still cannot start the Server.
@@ -121,15 +117,16 @@ def main() -> int:
             "prerequisite prompt would block a silent install")
     require(re.search(r"SuppressibleMsgBox\([^;]*IDNO\)", setup, re.S) is not None,
             "silent install does not default to continuing")
-    require(setup.count("Log('Prerequisite missing:") == 2,
-            "both missing prerequisites must be recorded in the install log")
+    require(setup.count("Log('Prerequisite missing:") == 1,
+            "the missing VC runtime must be recorded in the install log")
 
     # The install is not blocked: a user may be about to fetch the component.
     require("MB_YESNO" in setup, "prerequisite prompt is not a yes/no choice")
 
-    for url in ("https://developer.microsoft.com/zh-cn/microsoft-edge/webview2",
-                "https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist"):
-        require(url in script, f"missing download page: {url}")
+    require("https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist" in script,
+            "missing VC redist download page")
+    require("webview2" not in strip_pascal_comments(script).lower(),
+            "the installer still requires the WebView2 Runtime")
     require(re.search(r"'http://", script) is None,
             "a download page is offered over plain http")
 
@@ -137,7 +134,7 @@ def main() -> int:
         print(f"FAIL {failure}", file=sys.stderr)
     if failures:
         return 1
-    print("installer prerequisites: WebView2 and the VC runtime are checked before install")
+    print("installer prerequisites: only the VC runtime is checked before install; WebView2 is not required")
     return 0
 
 

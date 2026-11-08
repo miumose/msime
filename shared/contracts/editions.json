@@ -2,7 +2,8 @@
   "schema_version": 1,
   "resource_components": {
     "core": ["msime-english.db", "msime-scowl_Copyright.txt", "msime-others.db", "msime-dictionary-manifest.json"],
-    "chinese-main": ["msime-pinyin.db", "msime-wubi.db"],
+    "chinese-main": ["msime-pinyin.db"],
+    "wubi-table": ["msime-wubi.db"],
     "ngram": ["msime-bigram.bin", "msime-trigram.bin"],
     "sentence-model": ["sentence-model.safetensors"],
     "japanese": ["msime-japanese.dat", "msime-mozc_dictionary_oss_README.txt", "msime-mozc_LICENSE.txt"]
@@ -14,7 +15,7 @@
       "input_schemes": ["quanpin", "shuangpin", "wubi", "japanese", "korean", "cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"],
       "default_scheme": "quanpin",
       "preference_defaults": {},
-      "resources": { "components": ["core", "chinese-main", "ngram", "sentence-model", "japanese"] },
+      "resources": { "components": ["core", "chinese-main", "wubi-table", "ngram", "sentence-model", "japanese"] },
       "features": { "temporary_japanese": true, "neural_keyboard": true, "offline_glosses": true, "handwriting": true },
       "language_dictionaries": ["msime-cantonese.db", "msime-zhuyin.db", "msime-stroke.db"],
       "platforms": {
@@ -26,11 +27,11 @@
     {
       "id": "pinyin",
       "display_name": { "zh-Hans": "水杉拼音", "en": "MSIME Pinyin" },
-      "input_schemes": ["quanpin", "shuangpin"],
+      "input_schemes": ["quanpin"],
       "default_scheme": "quanpin",
       "preference_defaults": {},
-      "resources": { "components": ["core", "chinese-main", "ngram", "sentence-model", "japanese"] },
-      "features": { "temporary_japanese": true, "neural_keyboard": true, "offline_glosses": true, "handwriting": true },
+      "resources": { "components": ["core", "chinese-main", "ngram", "sentence-model"] },
+      "features": { "temporary_japanese": false, "neural_keyboard": true, "offline_glosses": false, "handwriting": false },
       "language_dictionaries": [],
       "platforms": {
         "macos": { "input_method_bundle_id": "app.msime.inputmethod.pinyin", "input_method_name": "水杉拼音", "settings_bundle_id": "app.msime.macos.pinyin", "keychain_service": "com.metasequoia.msime.pinyin.account", "cask": "msime-pinyin", "dmg_prefix": "msime-macos-pinyin" },
@@ -44,7 +45,7 @@
       "input_schemes": ["wubi"],
       "default_scheme": "wubi",
       "preference_defaults": { "wubi_mixed_pinyin": true },
-      "resources": { "components": ["core", "chinese-main", "ngram"] },
+      "resources": { "components": ["core", "chinese-main", "wubi-table", "ngram"] },
       "features": { "temporary_japanese": false, "neural_keyboard": false, "offline_glosses": true, "handwriting": true },
       "language_dictionaries": [],
       "platforms": {

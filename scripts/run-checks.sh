@@ -67,11 +67,7 @@ fi
 # Each special check as name=file-that-runs-it. The first three run inline in verify-local.sh, which holds the locks and toolchains they need; the Playwright pair needs a served fixture plus --url and --csp, which packages/ui/UPSTREAM.md describes; android-json-null-reads runs inside "android host java".
 special_checks="windows-32bit-compile=scripts/verify-local.sh
 windows-native-run=scripts/verify-local.sh
-harmony-settings-bundle=scripts/verify-local.sh
-android-json-null-reads=platforms/android/check-host.sh
-crash-symbols=scripts/run-checks.sh
-appearance-preview=packages/ui/UPSTREAM.md
-skin-palette-csp=packages/ui/UPSTREAM.md"
+crash-symbols=scripts/run-checks.sh"
 
 # A special check is only exempt from the loop because the file it names runs it. Without this, adding a name to special_checks would be a quiet way to switch a check off, and a stale name would hide a renamed script.
 note "contract check registry"

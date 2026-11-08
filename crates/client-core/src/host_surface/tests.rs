@@ -1183,24 +1183,21 @@ fn a_narrower_edition_drops_its_missing_schemes_and_says_which_edition_it_is() {
         capabilities
     );
 
-    // 宿主先在运行时去掉了某个方案（这里是双拼），版本再收窄时不会把它加回来；`edition` 里仍列出本版本的全部方案。
-    let pinyin = Edition::by_id("pinyin").unwrap();
+    // 宿主先在运行时去掉了某个方案（这里是五笔），版本再收窄时不会把它加回来；`edition` 里仍列出本版本的全部方案。
+    let wubi = Edition::by_id("wubi").unwrap();
     let mut capabilities = HostCapabilities::for_platform(HostPlatform::Linux);
     capabilities
         .input_schemes
-        .retain(|scheme| *scheme != InputScheme::Shuangpin);
-    capabilities.narrow_to_edition(pinyin);
-    assert_eq!(capabilities.input_schemes, [InputScheme::Quanpin]);
+        .retain(|scheme| *scheme != InputScheme::Wubi);
+    capabilities.narrow_to_edition(wubi);
+    assert!(capabilities.input_schemes.is_empty());
     let edition = capabilities.edition.unwrap();
-    assert_eq!(
-        edition.input_schemes,
-        [InputScheme::Quanpin, InputScheme::Shuangpin]
-    );
-    assert!(edition.temporary_japanese);
-    assert!(!edition.wubi_mixed_pinyin_default);
+    assert_eq!(edition.input_schemes, [InputScheme::Wubi]);
+    assert!(!edition.temporary_japanese);
+    assert!(edition.wubi_mixed_pinyin_default);
 }
 
-/// 不提供中文方案的版本（日文、越南文和藏文版）不带离线释义也不提供手写：设置页据此藏起手写页，macOS 和 Windows 悬浮工具栏的手写按钮开关也随之消失。提供中文方案的版本保持原样。
+/// 不提供中文方案的版本（日文、越南文和藏文版）不带离线释义也不提供手写：设置页据此藏起手写页，macOS 和 Windows 悬浮工具栏的手写按钮开关也随之消失。提供中文方案的版本可以关掉这两个开关（拼音精简版就不带它们），五笔版保持原样。
 #[test]
 fn editions_without_a_chinese_scheme_offer_no_handwriting_or_offline_glosses() {
     for id in ["japanese", "vietnamese", "tibetan"] {
@@ -1221,14 +1218,20 @@ fn editions_without_a_chinese_scheme_offer_no_handwriting_or_offline_glosses() {
         assert!(!edition.handwriting, "{id}");
         assert!(!edition.offline_glosses, "{id}");
     }
-    for id in ["pinyin", "wubi"] {
-        let mut capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
-        capabilities.narrow_to_edition(Edition::by_id(id).unwrap());
-        assert!(capabilities.floating_toolbar_handwriting, "{id}");
-        let edition = capabilities.edition.unwrap();
-        assert!(edition.handwriting, "{id}");
-        assert!(edition.offline_glosses, "{id}");
-    }
+    // 拼音精简版提供中文方案，但关掉了手写和离线释义：打包不带对应数据，工具栏也没有手写按钮。
+    let mut capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
+    capabilities.narrow_to_edition(Edition::by_id("pinyin").unwrap());
+    assert!(!capabilities.floating_toolbar_handwriting);
+    let edition = capabilities.edition.unwrap();
+    assert!(!edition.handwriting);
+    assert!(!edition.offline_glosses);
+    // 五笔版仍带这两个功能。
+    let mut capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
+    capabilities.narrow_to_edition(Edition::by_id("wubi").unwrap());
+    assert!(capabilities.floating_toolbar_handwriting);
+    let edition = capabilities.edition.unwrap();
+    assert!(edition.handwriting);
+    assert!(edition.offline_glosses);
 }
 
 #[test]

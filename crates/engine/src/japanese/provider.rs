@@ -142,6 +142,7 @@ impl JapaneseProvider {
         }
     }
 
+    #[cfg(test)]
     pub fn query(&mut self, request: &QueryRequest) -> Vec<WordItem> {
         let mut destination = Vec::new();
         self.query_into(request, &mut destination);

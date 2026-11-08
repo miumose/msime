@@ -1,5 +1,0 @@
-#!/bin/bash
-# Omarchy runs every file in ~/.config/omarchy/hooks/theme-set.d/ after it switches theme, and msime-linux-setup links this one there as `msime`. It rewrites MSIME's `omarchy` candidate skin from the new palette and republishes the skin catalog, so a candidate window drawn with that skin takes the new colours without the settings window being opened. A removed installation leaves the link dangling, which omarchy-hook skips.
-settings='@CMAKE_INSTALL_FULL_BINDIR@/msime-linux-settings'
-[ -x "$settings" ] || exit 0
-exec "$settings" --sync-omarchy-theme

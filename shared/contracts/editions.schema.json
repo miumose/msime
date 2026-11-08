@@ -78,7 +78,7 @@
           "required": ["components"],
           "properties": {
             "components": {
-              "description": "resource_components 里的组件名。必须包含 core；full 包含全部组件。提供全拼、双拼或五笔的版本必须包含 chinese-main（msime-pinyin.db）；三者都不提供的版本（日文、越南文、藏文）不能包含 chinese-main 和 ngram：Engine 为它们准备的代次里没有 msime-pinyin.db，用户词库只收英文词。",
+              "description": "resource_components 里的组件名。必须包含 core；full 包含全部组件。提供全拼、双拼或五笔的版本必须包含 chinese-main（msime-pinyin.db）；三者都不提供的版本（日文、越南文、藏文）不能包含 chinese-main 和 ngram：Engine 为它们准备的代次里没有 msime-pinyin.db，用户词库只收英文词。提供五笔的版本还必须包含 wubi-table（msime-wubi.db，五笔码表与设置页的五笔反查），其他版本不能包含。",
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
@@ -101,11 +101,11 @@
               "type": "boolean"
             },
             "offline_glosses": {
-              "description": "非英文目标语言的离线候选释义（offline-glosses/zh-<语言>.db，按中文候选词查法、德、日、西、俄、韩文释义）。它只认中文候选，所以必须等于本版本是否提供中文方案（全拼、双拼、五笔、粤拼、注音、笔画，与 client-core 的 ChineseScheme::of 相同）；为 false 的版本各平台都不打包这些数据库。",
+              "description": "非英文目标语言的离线候选释义（offline-glosses/zh-<语言>.db，按中文候选词查法、德、日、西、俄、韩文释义）。它只认中文候选，所以只有提供中文方案（全拼、双拼、五笔、粤拼、注音、笔画，与 client-core 的 ChineseScheme::of 相同）的版本才能打开；为 false 的版本各平台都不打包这些数据库，提供中文方案的版本也可以关掉。",
               "type": "boolean"
             },
             "handwriting": {
-              "description": "手写输入。手写模型（桌面的 Zinnia handwriting-zh_CN.model、Android 的 ML Kit zh-Hani-CN）只认汉字，所以必须等于本版本是否提供中文方案；为 false 的版本不打包、不下载手写模型，也不提供手写面板和它的设置。",
+              "description": "手写输入。手写模型（桌面的 Zinnia handwriting-zh_CN.model、Android 的 ML Kit zh-Hani-CN）只认汉字，所以只有提供中文方案的版本才能打开；为 false 的版本不打包、不下载手写模型，也不提供手写面板和它的设置，提供中文方案的版本也可以关掉。",
               "type": "boolean"
             }
           }

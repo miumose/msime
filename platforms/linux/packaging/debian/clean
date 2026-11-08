@@ -1,7 +1,0 @@
-apps/desktop/dist/
-debian/cargo-home/
-debian/msime.postinst
-debian/msime.prerm
-debian/notices/
-debian/voice-runtime/
-target/

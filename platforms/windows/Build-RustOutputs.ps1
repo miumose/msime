@@ -1,6 +1,6 @@
 # Builds the Rust half of the Windows client for one architecture and collects it under fixed names in OutputDirectory/<arch>. None of it depends on the edition (editions rename the host DLL afterwards, Build-Client.ps1), so a release builds it once and hands the result to every edition's Build-Client.ps1 -RustOutputs. Without -RustOutputs, Build-Client.ps1 runs this itself for all three architectures. This script never signs or installs.
 #
-# x64: msime_host_api.dll with its import library and PDB, msime-mcp.exe and its PDB, and the Tauri panel shell as MSIME.exe and MSIME.pdb. The x64 host is built with `onnx-rerank`: the minimal ONNX Runtime static library pinned in resources/onnxruntime-minimal.lock.json (scripts/fetch_onnxruntime.py downloads and verifies it, so Python must be on PATH) is linked into it, and the Server's sessions run 整句联想「增强」's keystroke reranker on it when the installer put rerank-model and rerank-model-small beside the Server. The TIP loads the same DLL but its sessions never mount the reranker (tsf/HostConfiguration.cpp), which is why x86 and arm64, only ever loaded by the TIP, are built without it.
+# x64: msime_host_api.dll with its import library and PDB. The x64 host is built with `onnx-rerank`: the minimal ONNX Runtime static library pinned in resources/onnxruntime-minimal.lock.json (scripts/fetch_onnxruntime.py downloads and verifies it, so Python must be on PATH) is linked into it, and the Server's sessions run 整句联想「增强」's keystroke reranker on it when the installer put rerank-model and rerank-model-small beside the Server. The TIP loads the same DLL but its sessions never mount the reranker (tsf/HostConfiguration.cpp), which is why x86 and arm64, only ever loaded by the TIP, are built without it.
 # x86: the host DLL, import library and PDB, for the 32-bit TIP.
 # arm64: the host DLL and PDB, with the C runtime linked statically like the TIP, for the native half of the Arm64X TIP. ring assembles its ARM64 code with clang only, so clang must be on PATH.
 [CmdletBinding()]
@@ -72,34 +72,10 @@ try {
     if ($Architecture -eq 'x64') {
         [IO.File]::WriteAllText($ortStamp, "$ortDigest`n")
     }
-    # Take the host and its PDB now: the MCP and desktop builds below share this target directory and can rebuild host-api, rewriting the PDB under the same name. The copy keeps the file name the DLL records; Collect-Symbols.ps1 packs it.
+    # Take the host and its PDB now: the onnx-rerank feature can rebuild host-api, rewriting the PDB under the same name. The copy keeps the file name the DLL records; Collect-Symbols.ps1 packs it.
     $hostFiles = @('msime_host_api.dll', 'msime_host_api.pdb')
     if ($Architecture -ne 'arm64') { $hostFiles += 'msime_host_api.dll.lib' }
     Invoke-RustBuild cmake (@('-E', 'copy_if_different') + @($hostFiles | ForEach-Object { Join-Path $release $_ }) + @($output))
-    if ($Architecture -eq 'x64') {
-        # msime-mcp --version 和 MCP 握手报告的版本（crates/mcp-server/build.rs）；没给 TargetVersion 时它读 platforms/windows/version.txt。
-        if ($TargetVersion -ne '') { $env:MSIME_VERSION = $TargetVersion }
-        Invoke-RustBuild cargo @('build', '--locked', '--release', '--target', $triple, '-p', 'msime-mcp-server', '--bin', 'msime-mcp')
-        Invoke-RustBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime-mcp.exe'), $output)
-        $mcpPdb = Get-SinglePdb $release @('msime_mcp.pdb', 'msime-mcp.pdb') 'MCP server'
-        Invoke-RustBuild cmake @('-E', 'copy_if_different', $mcpPdb, (Join-Path $output 'msime-mcp.pdb'))
-
-        Invoke-RustBuild pnpm @('install', '--frozen-lockfile')
-        Invoke-RustBuild pnpm @('--filter', '@msime/desktop', 'typecheck')
-        $desktopBuild = @('--filter', '@msime/desktop', 'tauri', 'build', '--no-bundle', '--target', $triple)
-        if ($TargetVersion -ne '') {
-            # Pass a file rather than inline JSON: pnpm is a .cmd shim on Windows, and PowerShell hands batch files their arguments without escaping the embedded quotes.
-            $versionConfig = Join-Path $output 'tauri-version.json'
-            [IO.File]::WriteAllText($versionConfig, (@{ version = $TargetVersion } | ConvertTo-Json -Compress))
-            $desktopBuild += @('--config', $versionConfig)
-        }
-        # apps/desktop/scripts/require-platform-build.mjs refuses a Tauri build that no platform script asked for.
-        $env:MSIME_PLATFORM_BUILD = '1'
-        Invoke-RustBuild pnpm $desktopBuild
-        Invoke-RustBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime-desktop.exe'), (Join-Path $output 'MSIME.exe'))
-        $desktopPdb = Get-SinglePdb $release @('msime_desktop.pdb', 'msime-desktop.pdb') 'Tauri desktop'
-        Invoke-RustBuild cmake @('-E', 'copy_if_different', $desktopPdb, (Join-Path $output 'MSIME.pdb'))
-    }
 } finally {
     $env:CARGO_TARGET_DIR = $previousTarget
     $env:CARGO_PROFILE_RELEASE_DEBUG = $previousDebug

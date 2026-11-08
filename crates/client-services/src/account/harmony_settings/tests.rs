@@ -779,14 +779,16 @@ fn the_account_scheme_follows_the_edition_both_ways() {
     assert!(!wubi.contains_key(HARMONY_KEYBOARD_LAYOUT));
     assert!(!wubi.contains_key("input.shuangpin_schema"));
     assert_eq!(wubi["input.wubi_schema"], string("wubi98"));
-    // 多方案版本上传自己的方案，从不上传五笔版本。
+    // 拼音版现在只有一个方案：与五笔版一样，不上传方案、触屏布局和它不提供的双拼/五笔版本。
     let mut pinyin = exported(&Preferences {
         scheme: InputScheme::Shuangpin,
         shuangpin_profile: ShuangpinProfile::Ziranma,
         ..Preferences::default()
     });
     filter_uploaded_account_settings(Edition::by_id("pinyin"), &mut pinyin);
-    assert_eq!(pinyin["input.schema"], string("shuangpin"));
+    assert!(!pinyin.contains_key("input.schema"));
+    assert!(!pinyin.contains_key(HARMONY_KEYBOARD_LAYOUT));
+    assert!(!pinyin.contains_key("input.shuangpin_schema"));
     assert!(!pinyin.contains_key("input.wubi_schema"));
 
     let downloaded = |edition: Option<&Edition>, local: &Preferences| {

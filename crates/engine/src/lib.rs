@@ -13,8 +13,6 @@
 
 pub mod access;
 pub mod assets;
-#[doc(hidden)]
-pub mod backend;
 mod cache;
 pub mod cantonese;
 pub mod diagnostics;
@@ -54,9 +52,6 @@ pub mod touch;
 mod types;
 mod user_dictionary;
 pub mod vietnamese;
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-#[doc(hidden)]
-pub mod web;
 mod wubi;
 pub mod zhuyin;
 

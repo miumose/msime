@@ -562,30 +562,4 @@ mod tests {
             })
         );
     }
-
-    /// Android 宿主的配色检查（scripts/test-android-app-theme-parity.py）读这份提交进仓库的副本；它必须与 `catalog()` 一致。改了种子色后带 `MSIME_WRITE_THEME_CATALOG=1` 重跑本测试来重写它。
-    #[test]
-    fn app_theme_copy_matches() {
-        let catalog = serde_json::to_value(serde_json::json!({
-            "app_themes": catalog(),
-            "default": AppTheme::default(),
-        }))
-        .expect("catalog serializes");
-        if std::env::var_os("MSIME_WRITE_THEME_CATALOG").is_some() {
-            let path = concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../platforms/android/tests/settings/app-theme-catalog.json"
-            );
-            let text = serde_json::to_string_pretty(&catalog).expect("catalog prints") + "\n";
-            std::fs::write(path, text).expect("app theme catalog copy is writable");
-        }
-        let copy: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../platforms/android/tests/settings/app-theme-catalog.json"
-        ))
-        .expect("app theme catalog copy is JSON");
-        assert_eq!(
-            copy, catalog,
-            "platforms/android/tests/settings/app-theme-catalog.json is stale; rerun this test with MSIME_WRITE_THEME_CATALOG=1"
-        );
-    }
 }

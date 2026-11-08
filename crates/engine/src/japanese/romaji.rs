@@ -438,6 +438,7 @@ fn scan_romaji_with(
 }
 
 /// 将 `U+3041..=U+3096` 加 `0x60`；其余字符（包括ー）原样保留。
+#[cfg(test)]
 pub fn hiragana_to_katakana(hiragana: &str) -> String {
     let mut katakana = String::with_capacity(hiragana.len());
     hiragana_to_katakana_into(hiragana, &mut katakana);

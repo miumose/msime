@@ -144,7 +144,6 @@ if ($DesktopPreviewExecutable) {
     $stagedPreview = Join-Path $serverRelease 'MSIME.exe'
     if (Test-Path -LiteralPath $stagedPreview -PathType Leaf) { $previewSource = $stagedPreview }
 }
-$mcpRelease = Join-Path $serverRelease 'msime-mcp.exe'
 if (-not $Tsf32ReleaseDirectory -and (Test-Path -LiteralPath (Join-Path $RepoRoot "$editionBuild/x86/bin") -PathType Container)) {
     $Tsf32ReleaseDirectory = "$editionBuild/x86/bin"
 }
@@ -207,11 +206,6 @@ if ($DesktopPreviewExecutable -and -not (Test-Path -LiteralPath $previewSource -
 }
 Assert-PathExists -LiteralPath $serverRelease -Description 'Server Release 输出目录'
 Assert-PathExists -LiteralPath (Join-Path $serverRelease 'MetasequoiaImeWatchdog.exe') -Description 'Watchdog Release EXE'
-Assert-PathExists -LiteralPath $mcpRelease -Description 'MCP 服务程序 Release EXE'
-# 现代包的原生面板宿主（Build-Client.ps1 用 panels/win7 的源码编出的 msime-client-panels.exe）随 Server 输出整体复制。缺了它，MSIME_WINDOWS_PANEL_HOST=native 的机器上托盘和设置里的面板入口全都不可用，所以在替换旧暂存之前就拒绝。Win7 包用自己的 msime-client-panels-win7.exe。
-if ($Windows7Architecture -eq '') {
-    Assert-PathExists -LiteralPath (Join-Path $serverRelease 'msime-client-panels.exe') -Description '原生面板宿主 msime-client-panels.exe'
-}
 Assert-PathExists -LiteralPath $tsf32Release -Description '32 位 TSF Release DLL'
 Assert-PathExists -LiteralPath $tsf32WerHelper -Description '32 位 TSF 的 WER helper'
 if ($Windows7Architecture -ne 'x86') {

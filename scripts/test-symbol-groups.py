@@ -23,26 +23,16 @@ LICENCE = ROOT / "resources/licenses/Unicode-License-V3.txt"
 UCD_FILES = ("UnicodeData.txt", "Blocks.txt", "EquivalentUnifiedIdeograph.txt")
 # 每个渠道都要在非注释行写出许可证的文件名。
 NOTICE_CHANNELS = {
-    "platforms/macos/CMakeLists.txt": "macOS: the input method bundle's Resources/Licenses",
-    "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt": "macOS: the notice overview",
-    "platforms/macos/tests/settings/bundle_contents.py": "macOS: the built bundle check",
-    "platforms/linux/CMakeLists.txt": "Linux: the installed notices",
-    "platforms/linux/data/THIRD_PARTY_NOTICES.txt": "Linux: the notice overview",
     "platforms/windows/Collect-Notices.ps1": "Windows: the notice collection the installer ships",
     "platforms/windows/Notices.md": "Windows: the notice collection's documentation",
-    "platforms/android/build-native.sh": "Android: the native notices both APKs package as assets/native-notices",
-    "platforms/harmony/stage-resources.sh": "HarmonyOS: the licences staged into the HAP",
-    "platforms/ios/project.yml": "iOS: the app's bundled resources",
-    "platforms/ios/tests/settings/ProjectConfigurationTests.py": "iOS: the project configuration test",
     "docs/third-party.md": "the repository's third-party index",
-    "scripts/web-engine-notice.sh": "Web engine: the licence texts the NOTICE of each web-engine release copies",
 }
+
 # 总览写明每份文本覆盖什么，所以还要写出符号模式的表和它取自的 UCD 版本。
 OVERVIEWS = (
-    "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt",
-    "platforms/linux/data/THIRD_PARTY_NOTICES.txt",
     "platforms/windows/Collect-Notices.ps1",
 )
+
 # 样例：分组码 → (组名, 头几个符号, 符号数)。数目变了说明生成规则或锁定的 UCD 版本动过，要人工复核。
 SAMPLES = {
     "xl": ("希腊字母小写", ["α", "β", "γ"], 25),

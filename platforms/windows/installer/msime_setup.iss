@@ -266,13 +266,6 @@ const
   { 本版本写进所有权标记的内容。标记里带着版本 id，OwnsDataDir 只认它，不认别的版本的标记。 }
   DataDirMarkerText = 'This directory is managed by Metasequoia IME (edition {#Edition}).';
 
-  { WebView2 Evergreen Runtime 在 EdgeUpdate 里的固定客户端 ID。}
-  WebView2ClientKey =
-    'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
-  { InitializeSetup 在选语言对话框之前就跑，拿不到用户选的语言，界面本身也是中文，
-    所以下载页统一给简体中文版，省得用户落到英文页上再自己切。}
-  WebView2DownloadUrl =
-    'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2';
   VCRuntimeKey = 'Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
   VCRuntimeDownloadUrl =
     'https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170';
@@ -293,24 +286,8 @@ var
   { 卸载时是否连数据目录一起删除，由 DecideUserDataRemoval 在 usUninstall 一开始决定。默认保留。 }
   RemoveUserDataOnUninstall: Boolean;
 
-{ WebView2 Runtime 与 VC 运行库都不随包分发：前者有自己的 Evergreen 更新通道，后者是系统级共享组件，安装器不该替用户装。但缺了任何一个，输入法装完就是坏的，而故障现场在安装结束之后——Server 起不来，或者点表情、手写这些面板什么都不出现，用户看不到任何解释。所以在安装开始前查一遍，把原因当场说清楚。
-
-  返回空串表示没装；否则是 pv 里的版本号。}
-function ReadWebView2Version: String;
-begin
-  Result := '';
-  { 机器级安装由 32 位的 EdgeUpdate 写入，键落在 WOW6432Node 下。本安装器跑在
-    64 位模式，HKLM 默认就是 64 位视图，所以主查 HKLM32；HKLM64 作为后备，
-    以防将来的 ARM64 / 原生 64 位布局换了位置。用户级安装写在 HKCU。
-    卸载没清干净的机器上 pv 可能残留成 0.0.0.0。}
-  if not RegQueryStringValue(HKLM32, WebView2ClientKey, 'pv', Result) then
-    if not RegQueryStringValue(HKLM64, WebView2ClientKey, 'pv', Result) then
-      if not RegQueryStringValue(HKCU, WebView2ClientKey, 'pv', Result) then
-        Result := '';
-  Result := Trim(Result);
-  if Result = '0.0.0.0' then
-    Result := '';
-end;
+{ VC 运行库不随包分发：它是系统级共享组件，安装器不该替用户装。缺了它输入法装完就是坏的，
+  而故障现场在安装结束之后——Server 起不来，用户看不到任何解释。所以在安装开始前查一遍。}
 
 // 用注册表判定，而不是去 System32 里找 vcruntime140.dll：Setup.exe 是 32 位进程，
 // Pascal Script 的 FileExists 会被 WOW64 重定向到 SysWOW64（[Files] 和 Exec 里的
@@ -369,8 +346,6 @@ end;
 
 function InitializeSetup: Boolean;
 var
-  WebView2Version: String;
-  NeedsWebView2: Boolean;
   NeedsVCRuntime: Boolean;
   Prompt: String;
 begin
@@ -380,20 +355,14 @@ begin
   exit;
 #endif
 
-  WebView2Version := ReadWebView2Version;
-  NeedsWebView2 := WebView2Version = '';
-  if NeedsWebView2 then
-    Log('Prerequisite missing: Microsoft Edge WebView2 Runtime.')
-  else
-    Log('WebView2 Runtime found: ' + WebView2Version);
-
+  { 这个产品不带 WebView 界面：设置和面板都是原生的，安装只要求 VC 运行库。}
   NeedsVCRuntime := not VCRuntimeIsInstalled;
   if NeedsVCRuntime then
     Log('Prerequisite missing: Visual C++ 2015-2022 Redistributable (x64).')
   else
     Log('Visual C++ runtime found: ' + ReadVCRuntimeVersion);
 
-  if not (NeedsWebView2 or NeedsVCRuntime) then
+  if not NeedsVCRuntime then
     exit;
 
   Prompt := '这台电脑缺少输入法运行所需的系统组件：' + #13#10;
@@ -403,12 +372,6 @@ begin
       '   缺少它输入法主程序根本无法启动（提示找不到 VCRUNTIME140.dll 之类）。' + #13#10 +
       '   下载：' + VCRuntimeDownloadUrl + #13#10 +
       '   直链：https://aka.ms/vs/17/release/vc_redist.x64.exe' + #13#10;
-  if NeedsWebView2 then
-    Prompt := Prompt + #13#10 +
-      '● Microsoft Edge WebView2 Runtime' + #13#10 +
-      '   缺少它表情 / 手写 / 屏幕键盘 / 语音 / 云剪贴板 / 云词库 / 背单词面板都打不开；' + #13#10 +
-      '   设置窗口、托盘语音输入和候选窗口是原生实现，不受影响。' + #13#10 +
-      '   下载：' + WebView2DownloadUrl + #13#10;
   Prompt := Prompt + #13#10 +
     '点击「是」打开下载页面并结束本次安装，装好组件后重新运行本安装程序；' + #13#10 +
     '点击「否」继续安装（装完仍需自行补齐上述组件，输入法才能正常工作）。';
@@ -418,10 +381,7 @@ begin
     SuppressibleMsgBox(Prompt, mbConfirmation, MB_YESNO, IDNO) = IDYES
   then
   begin
-    if NeedsVCRuntime then
-      OpenDownloadPage(VCRuntimeDownloadUrl);
-    if NeedsWebView2 then
-      OpenDownloadPage(WebView2DownloadUrl);
+    OpenDownloadPage(VCRuntimeDownloadUrl);
     Result := False;
   end;
 end;

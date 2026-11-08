@@ -21,11 +21,6 @@ pub struct LocalDateTime {
     pub second: u32,
 }
 
-/// 日期字段是否构成有效公历日期。
-pub(crate) fn is_valid_calendar_date(year: i32, month: u32, day: u32) -> bool {
-    calendar_date(year, month, day).is_some()
-}
-
 fn calendar_date(year: i32, month: u32, day: u32) -> Option<Date> {
     Date::from_calendar_date(
         year,

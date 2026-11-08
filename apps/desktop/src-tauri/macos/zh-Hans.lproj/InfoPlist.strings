@@ -1,3 +1,0 @@
-/* The localised name Finder, the Dock and the menu bar show. macOS uses it only while CFBundleName and CFBundleDisplayName in Info.plist equal the bundle's file name, MSIME, which stays so for the Homebrew cask and every agent's MCP configuration; do not override those keys. */
-"CFBundleDisplayName" = "水杉输入法";
-"CFBundleName" = "水杉输入法";

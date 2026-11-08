@@ -41,8 +41,8 @@ try {
     $voiceLock = Join-Path $root 'resources/voice-runtime.lock.json'
     New-Item -ItemType Directory -Force (Split-Path -Parent $voiceLock) | Out-Null
     [IO.File]::WriteAllText($voiceLock, '{ "version": "1.13.8" }')
-    $voiceNotices = @('shared/voice/third_party/sherpa-onnx/LICENSE', 'platforms/linux/data/licenses/onnxruntime-MIT.txt',
-        'platforms/linux/data/licenses/onnxruntime-ThirdPartyNotices.txt')
+    $voiceNotices = @('shared/voice/third_party/sherpa-onnx/LICENSE', 'resources/licenses/onnxruntime-MIT.txt',
+        'resources/licenses/onnxruntime-ThirdPartyNotices.txt')
     foreach ($relative in $voiceNotices) {
         $path = Join-Path $root $relative
         New-Item -ItemType Directory -Force (Split-Path -Parent $path) | Out-Null
@@ -68,7 +68,7 @@ try {
     }
     # Prepare-PackageFiles.ps1 looks for these names before it packages the runtime DLLs.
     if (-not $first.Contains('===== sherpa-onnx 1.13.8 (sherpa-onnx-c-api.dll), Apache License 2.0 (shared/voice/third_party/sherpa-onnx/LICENSE) =====') -or
-        -not $first.Contains('===== ONNX Runtime (onnxruntime.dll, onnxruntime_providers_shared.dll), MIT License (platforms/linux/data/licenses/onnxruntime-MIT.txt) =====')) {
+        -not $first.Contains('===== ONNX Runtime (onnxruntime.dll, onnxruntime_providers_shared.dll), MIT License (resources/licenses/onnxruntime-MIT.txt) =====')) {
         throw 'Voice runtime notice provenance mismatch'
     }
     & $entry -RepoRoot $root -DependencyPrefixes @($prefix) -SupplementalNotices @($supplement)
@@ -102,7 +102,7 @@ try {
         # A package carrying the speech runtime without its license is refused as well.
         if ($failure -eq 'voice') {
             [IO.File]::WriteAllText($license, 'synthetic dependency copyright')
-            Remove-Item -LiteralPath (Join-Path $root 'platforms/linux/data/licenses/onnxruntime-MIT.txt')
+            Remove-Item -LiteralPath (Join-Path $root 'resources/licenses/onnxruntime-MIT.txt')
         }
         $rejected = $false
         try { & $entry -RepoRoot $root -DependencyPrefixes @($prefix) } catch { $rejected = $true }

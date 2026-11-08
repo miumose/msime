@@ -51,20 +51,9 @@ LLVM_LICENCE = "libcxx-Apache-2.0-WITH-LLVM-exception.txt"
 # 引擎编进的 LaTeX 表是 MIT，不带官方短语表包的构建也要带上它的全文；Windows 与网页引擎直接收 plugins/phrase_table/LICENSE。
 LATEX_LICENCE = "latex-symbols-MIT.txt"
 CHANNELS = {
-    "platforms/macos/CMakeLists.txt": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/macos/tests/settings/bundle_contents.py": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/linux/CMakeLists.txt": (LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/linux/data/THIRD_PARTY_NOTICES.txt": (LLVM_LICENCE, LATEX_LICENCE),
     "platforms/windows/Collect-Notices.ps1": (LLVM_LICENCE, "plugins/phrase_table/LICENSE"),
     "platforms/windows/tests/tools/collect_notices.ps1": (LLVM_LICENCE,),
     "platforms/windows/Notices.md": (LLVM_LICENCE,),
-    "platforms/android/build-native.sh": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/harmony/stage-resources.sh": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/ios/project.yml": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/ios/tests/settings/ProjectConfigurationTests.py": ("MPL-2.0.txt", LLVM_LICENCE, LATEX_LICENCE),
-    "platforms/ios/App/Sources/settings/AboutAndDownloadViews.swift": ('"MPL-2.0"', '"libcxx-Apache-2.0-WITH-LLVM-exception"', '"latex-symbols-MIT"'),
-    "scripts/web-engine-notice.sh": ("crates/engine/LICENSE", LLVM_LICENCE, "librime-octagram-BSD-3-Clause.txt", "Unicode-License-V3.txt", "plugins/phrase_table/LICENSE"),
     "docs/third-party.md": (LLVM_LICENCE, "crates/engine/README.md"),
 }
 COLLECTOR = "platforms/linux/collect-notices.py"
@@ -216,29 +205,8 @@ def main() -> int:
         lines = live_lines(ROOT / channel)
         for name in names:
             check(any(name in line for line in lines), f"{channel} does not ship {name}")
-    collector = (ROOT / COLLECTOR).read_text(encoding="utf-8")
-    check('PROJECT_LICENSE = "GPL-3.0-only"' in collector and 'p.get("license") != PROJECT_LICENSE' in collector, f"{COLLECTOR} no longer collects the workspace members that are not GPL-3.0-only, so the engine's LICENSE drops out of rust-crates-NOTICES.txt")
     for document in INBOUND_DOCS:
         check(INBOUND in (ROOT / document).read_text(encoding="utf-8"), f"{document} does not state that contributions to the engine are licensed {INBOUND}")
-
-    packaging = ROOT / "platforms/linux/packaging"
-    spec = re.search(r"^License:\s*(.+)$", (packaging / "rpm/msime.spec").read_text(encoding="utf-8"), re.MULTILINE).group(1)
-    missing = sorted(expected - spdx_ids(spec))
-    check(not missing, f"rpm/msime.spec License lacks {missing}, which the engine compiles in")
-    gentoo_names = {"MPL-2.0", "BSD", "BSD-2", "CC-BY-3.0", "Unicode-3.0", "Apache-2.0", "Apache-2.0-with-LLVM-exceptions", "MIT", "WTFPL-2"}
-    for ebuild in ("gentoo/app-i18n/msime/msime.ebuild.in", "gentoo/app-i18n/msime/msime-9999.ebuild"):
-        line = re.search(r'^LICENSE="([^"]*)"$', (packaging / ebuild).read_text(encoding="utf-8"), re.MULTILINE)
-        listed = set(line.group(1).split()) if line else set()
-        check(gentoo_names <= listed, f"{ebuild} LICENSE lacks {sorted(gentoo_names - listed)}")
-    copyright_text = (packaging / "debian/copyright").read_text(encoding="utf-8")
-    check(re.search(r"^Files: crates/engine/\* crates/path-trust/\*\n(?:.+\n)*?License: MPL-2.0$", copyright_text, re.MULTILINE) is not None, "debian/copyright has no MPL-2.0 stanza for crates/engine and crates/path-trust")
-    # 录自 GPL-3.0 词库的金样和手写参考输出只给测试读，不在 MPL-2.0 之内；DEP-5 以最后一个匹配的段为准，所以这一段要排在 crates/engine/* 之后。
-    fixtures = re.search(r"^Files: crates/engine/tests/golden/real/\* crates/engine/src/handwriting/testdata/\*\n(?:.+\n)*?License: GPL-3.0-only$", copyright_text, re.MULTILINE)
-    check(fixtures is not None and fixtures.start() > copyright_text.index("Files: crates/engine/* crates/path-trust/*"), "debian/copyright does not keep the engine's test fixtures under GPL-3.0-only after the crates/engine/* stanza")
-    nix = (ROOT / "platforms/linux/nix/fcitx5.nix").read_text(encoding="utf-8")
-    # 后三项不是引擎的，是同一个派生编进或链接的 Wayland 协议代码与 Rust 依赖，rpm/msime.spec 的 License 也列着。
-    for attribute in ("mpl20", "cc-by-30", "unicode-30", "bsd2", "bsd3", "wtfpl", "llvm-exception", "hpnd", "isc", "zlib"):
-        check(f"lib.licenses.{attribute}\n" in nix, f"platforms/linux/nix/fcitx5.nix meta.license lacks lib.licenses.{attribute}")
 
     licences = ENGINE / "licenses"
     shipped = {path.name for path in licences.iterdir()} if licences.is_dir() else set()

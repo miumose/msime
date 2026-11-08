@@ -38,7 +38,7 @@ try {
     }
     foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
         'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
-        'platforms/windows/settings/MSIME.Settings.vcxproj', 'apps/desktop/package.json',
+        'platforms/windows/settings/MSIME.Settings.vcxproj',
         'scripts/fetch_voice_runtime.py')) {
         $path = Join-Path $fixture $relative
         New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
@@ -82,7 +82,6 @@ try {
     & $entry -RepoRoot $fixture -X64Dependencies $x64 -X86Dependencies $x86 -TargetVersion '2026.9.1'
     $count = $global:ClientBuildCalls.Count
     $desktopCall = @($global:ClientBuildCalls | Where-Object { $_.Name -eq 'pnpm' -and $_.Values -contains 'tauri' })[0]
-    # The Tauri gate (apps/desktop/scripts/require-platform-build.mjs) lets only this call through.
     if ($desktopCall.PlatformBuild -ne '1') { throw 'Tauri build ran without MSIME_PLATFORM_BUILD' }
     $desktopArgs = $desktopCall.Values
     $configIndex = [Array]::IndexOf($desktopArgs, '--config')

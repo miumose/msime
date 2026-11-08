@@ -633,15 +633,21 @@ mod tests {
         assert_eq!(full.display_name.en, "MSIME");
     }
 
+    /// 精简的拼音版：只有全拼，不带临时日文、手写和离线释义；随包资源也不含日文词库和五笔码表。
     #[test]
-    fn pinyin_offers_quanpin_and_shuangpin_with_temporary_japanese() {
+    fn pinyin_offers_only_quanpin_without_optional_models() {
         let pinyin = Edition::by_id("pinyin").unwrap();
-        assert_eq!(
-            pinyin.input_schemes,
-            [InputScheme::Quanpin, InputScheme::Shuangpin]
-        );
+        assert_eq!(pinyin.input_schemes, [InputScheme::Quanpin]);
         assert_eq!(pinyin.default_scheme, InputScheme::Quanpin);
-        assert!(pinyin.features.temporary_japanese);
+        assert_eq!(
+            pinyin.features,
+            EditionFeatures {
+                temporary_japanese: false,
+                neural_keyboard: true,
+                offline_glosses: false,
+                handwriting: false,
+            }
+        );
         assert_eq!(pinyin.display_name.zh_hans, "水杉拼音");
         assert_eq!(pinyin.display_name.en, "MSIME Pinyin");
     }
@@ -719,31 +725,36 @@ mod tests {
         }
     }
 
-    /// 离线释义和手写只认中文：两者都等于版本是否提供中文方案，与 `scripts/test-editions.py` 对版本表的检查是同一条规则。
+    /// 离线释义和手写只认中文：没有中文方案的版本必须关掉，提供中文方案的版本可以关掉（拼音精简版就不带）。
+    /// 与 `scripts/test-editions.py` 对版本表的检查是同一条规则。
     #[test]
-    fn chinese_only_features_follow_the_chinese_schemes() {
+    fn chinese_only_features_need_a_chinese_scheme() {
         for edition in Edition::all() {
             let writes_chinese = edition
                 .input_schemes
                 .iter()
                 .any(|scheme| ChineseScheme::of(*scheme).is_some());
-            assert_eq!(
-                edition.features.offline_glosses, writes_chinese,
-                "{}",
-                edition.id
-            );
-            assert_eq!(
-                edition.features.handwriting, writes_chinese,
-                "{}",
-                edition.id
-            );
+            for (name, enabled) in [
+                ("offline_glosses", edition.features.offline_glosses),
+                ("handwriting", edition.features.handwriting),
+            ] {
+                assert!(
+                    !enabled || writes_chinese,
+                    "{}: features.{name} is on without a Chinese scheme",
+                    edition.id
+                );
+            }
             assert_eq!(
                 edition.offers_touch_scheme(TouchKeyboardScheme::Handwriting),
-                writes_chinese,
+                edition.features.handwriting,
                 "{}",
                 edition.id
             );
         }
+        // 拼音精简版提供中文方案，但不带手写和离线释义。
+        let pinyin = Edition::by_id("pinyin").unwrap();
+        assert!(!pinyin.features.offline_glosses);
+        assert!(!pinyin.features.handwriting);
     }
 
     #[test]
@@ -798,7 +809,7 @@ mod tests {
             offered,
             [TouchKeyboardScheme::Wubi, TouchKeyboardScheme::Handwriting]
         );
-        // 全拼 14 键跟着全拼走：拼音版有，五笔版和日文版没有。
+        // 全拼 14 键跟着全拼走：拼音版有，五笔版和日文版没有。拼音版只有全拼，所以双拼键位的四项（小鹤、自然码、微软、首道）和手写都不提供。
         let pinyin = Edition::by_id("pinyin").unwrap();
         let offered: Vec<_> = TouchKeyboardScheme::ALL
             .into_iter()
@@ -809,11 +820,6 @@ mod tests {
             [
                 TouchKeyboardScheme::Quanpin,
                 TouchKeyboardScheme::NineKey,
-                TouchKeyboardScheme::Xiaohe,
-                TouchKeyboardScheme::Ziranma,
-                TouchKeyboardScheme::Microsoft,
-                TouchKeyboardScheme::Shoudao,
-                TouchKeyboardScheme::Handwriting,
                 TouchKeyboardScheme::FourteenKey,
                 TouchKeyboardScheme::NineKeyShuangpin,
                 TouchKeyboardScheme::EighteenKey,
@@ -1058,31 +1064,14 @@ mod tests {
         }
     }
 
+    /// 拼音版只有一个方案：与五笔版一样，上传和下载都只同步学习记录，不带方案、双拼方案和触屏布局。
     #[test]
-    fn a_multi_scheme_edition_syncs_only_its_own_schemes() {
+    fn the_single_scheme_pinyin_edition_syncs_only_learning() {
         let pinyin = Edition::by_id("pinyin");
-        for scheme in ["quanpin", "shuangpin"] {
+        for scheme in ["quanpin", "shuangpin", "wubi", "japanese", "klingon"] {
             let mut uploaded = account_settings(scheme);
             filter_uploaded_account_settings(pinyin, &mut uploaded);
-            assert_eq!(
-                keys(&uploaded),
-                [
-                    "input.learning",
-                    "input.schema",
-                    "input.shuangpin_schema",
-                    "platform.android.keyboard_layout",
-                    "platform.harmony.keyboard_layout",
-                    "platform.ios.keyboard_layout",
-                    "platform.ios.nine_key"
-                ],
-                "{scheme}"
-            );
-            let mut downloaded = account_settings(scheme);
-            filter_downloaded_account_settings(pinyin, &mut downloaded);
-            assert_eq!(downloaded, account_settings(scheme), "{scheme}");
-        }
-        // 账号里是本版本没有的方案：当作没有这一项，本机方案不变，其余设置照常应用。
-        for scheme in ["wubi", "japanese", "korean", "cantonese"] {
+            assert_eq!(keys(&uploaded), ["input.learning"], "{scheme}");
             let mut downloaded = account_settings(scheme);
             filter_downloaded_account_settings(pinyin, &mut downloaded);
             assert_eq!(
@@ -1094,18 +1083,8 @@ mod tests {
                 ],
                 "{scheme}"
             );
-            let mut uploaded = account_settings(scheme);
-            filter_uploaded_account_settings(pinyin, &mut uploaded);
-            assert_eq!(
-                keys(&uploaded),
-                ["input.learning", "input.shuangpin_schema"],
-                "{scheme}"
-            );
+            assert!(!downloaded.contains_key("input.schema"), "{scheme}");
         }
-        // 不认识的取值留给平台代码，按原来的规则保留本机方案。
-        let mut downloaded = account_settings("klingon");
-        filter_downloaded_account_settings(pinyin, &mut downloaded);
-        assert!(downloaded.contains_key("input.schema"));
     }
 
     #[test]

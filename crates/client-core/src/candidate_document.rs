@@ -1,11 +1,11 @@
 //! The document side of a candidate window rendered as HTML.
 //!
 //! The reference offers two renderers for its candidate window: Direct2D, which is what this
-//! repository has, and a WebView2 document, chosen by `ui_backend`. The document's markup lives in
-//! `packages/ui/src/upstream/candidate-themes/` here already - an outer page per orientation and a
-//! body fragment per appearance - and the two contracts that turn a keystroke's candidates into
-//! that markup are in this module rather than in a host, because nothing in them is
-//! Windows-specific.
+//! repository has, and a WebView2 document, chosen by `ui_backend`. The document's markup was
+//! vendored from `packages/ui/src/upstream/candidate-themes/` and now lives under
+//! `tests/fixtures/` - an outer page per orientation and a body fragment per appearance - and the
+//! two contracts that turn a keystroke's candidates into that markup are in this module rather
+//! than in a host, because nothing in them is Windows-specific.
 //!
 //! The rest of that renderer is a WebView2 host window and is not here. What is missing and why is
 //! recorded in `docs/windows-parity.md`.
@@ -185,9 +185,8 @@ mod tests {
         ignore = "读主机仓库里的文件，设备上没有这份检出"
     )]
     fn the_vendored_fragment_renders_a_page_of_candidates() {
-        let fragment = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../packages/ui/src/upstream/candidate-themes/vertical_candidate_window_dark.html",
-        );
+        let fragment = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/vertical_candidate_window_dark.html");
         let template = std::fs::read_to_string(&fragment)
             .unwrap_or_else(|error| panic!("{}: {error}", fragment.display()));
 
