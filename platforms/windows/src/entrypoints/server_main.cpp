@@ -4,7 +4,6 @@
 #include "../../compat/WindowsDpi.h"
 #include "../../../common/HostApiString.h"
 #include "AuxListener.h"
-#include "VoiceTheme.h"
 #include "CandidateAppearance.h"
 #include "CandidateCanvasImages.h"
 #include "CandidateSkin.h"
@@ -65,10 +64,6 @@
 #include "DictionarySyncSchedule.h"
 #include "DictionarySyncWorker.h"
 #include "../../common/DictionarySyncDirectory.h"
-#include "VoiceControllerListener.h"
-#include "VoiceHotkey.h"
-#include "VoiceInputSession.h"
-#include "VoiceSessionPolicy.h"
 #include "SystemSpeech.h"
 #include "WatchdogPolicy.h"
 #include "Telemetry.h"
@@ -103,21 +98,6 @@ std::filesystem::path executable_directory() {
   if (!length || length == path.size())
     return {};
   return std::filesystem::path(std::wstring(path.data(), length)).parent_path();
-}
-std::wstring voice_audio_path(const msime::windows::PreviewConfig &config,
-                              const wchar_t *filename) {
-  const auto executable = executable_directory();
-  const std::array<std::filesystem::path, 5> candidates = {
-      config.state_root / "audios" / filename,
-      config.resources / "audios" / filename,
-      config.resources / "assets" / "audios" / filename,
-      executable / "assets" / "audios" / filename,
-      executable.parent_path() / "share" / "msime" / "audios" / filename};
-  std::error_code error;
-  for (const auto &candidate : candidates)
-    if (std::filesystem::is_regular_file(candidate, error))
-      return candidate.wstring();
-  return {};
 }
 std::wstring configured_shell_command() {
   std::vector<wchar_t> value(32768);
@@ -1127,7 +1107,7 @@ int wmain(int argc, wchar_t **argv) {
     // registers later is not left holding compiled defaults. A revision is
     // used instead of a bool so an older send cannot clear a newer update.
     auto tsf_config_revision = std::make_shared<msime::windows::RevisionFence>();
-    // 工具栏、托盘菜单、语音浮层一律跟随颜色模式（HostCapabilities::surface_themes_follow），不读存下的 toolbar_theme、menu_theme、voice_theme；三个原子量照旧由偏好发布更新，只是都由全局的 `theme` 算出。
+    // 工具栏、托盘菜单、语音浮层一律跟随颜色模式（HostCapabilities::surface_themes_follow），不读存下的 toolbar_theme、menu_theme、voice_theme。
     // Cross-application CN/EN authority, when the user asked for one state to
     // follow them between applications.
     auto mode_scope_global = std::make_shared<std::atomic<bool>>(
@@ -1149,7 +1129,6 @@ int wmain(int argc, wchar_t **argv) {
     };
     auto menu_theme = std::make_shared<std::atomic<SurfaceThemeMode>>(followed_surface_theme());
     auto toolbar_theme = std::make_shared<std::atomic<SurfaceThemeMode>>(followed_surface_theme());
-    auto voice_theme = std::make_shared<std::atomic<SurfaceThemeMode>>(followed_surface_theme());
     auto toolbar_enabled = std::make_shared<std::atomic<bool>>(
         prepared.at("value").at("preferences")
             .value("floating_toolbar", nlohmann::json::object())
@@ -1250,12 +1229,6 @@ int wmain(int argc, wchar_t **argv) {
         prepared.at("value").at("preferences").value("clipboard_history", false));
     clipboard_history.set_limit(
         prepared.at("value").at("preferences").value("clipboard_history_limit", 50u));
-    auto voice_config = std::make_shared<VoiceInputConfig>();
-    auto voice_config_mutex = std::make_shared<std::mutex>();
-    // Local recognition reads the user's dictionary words through these options. Listing the dictionary needs only the paths, which do not change while the Server runs, so the startup document serves every later preference snapshot.
-    const auto voice_host_options =
-        std::make_shared<const std::string>(prepared.at("value").dump());
-    voice_config->host_options = voice_host_options;
     WindowsServerOptions options;
     options.pipes.names = production ? production_pipe_names()
                                      : config.pipe_names();
@@ -1300,8 +1273,8 @@ int wmain(int argc, wchar_t **argv) {
     };
     options.preferences_directory = config.state_root.u8string();
     options.preferences_published =
-        [&, voice_config, voice_config_mutex, voice_host_options, traditional_output,
-         toolbar_enabled, follow_cursor, game_anchor_top, shuangpin_keymap_enabled, typing_feedback, candidate_mouse_wheel, voice_theme, candidate_fonts, candidate_style,
+        [&, traditional_output,
+         toolbar_enabled, follow_cursor, game_anchor_top, shuangpin_keymap_enabled, typing_feedback, candidate_mouse_wheel, candidate_fonts, candidate_style,
          toolbar_theme, menu_theme, mode_scope_global, app_mode_rules,
          input_mode_hud_enabled, input_mode_hud_logo, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
@@ -1367,7 +1340,6 @@ int wmain(int argc, wchar_t **argv) {
             std::lock_guard<std::mutex> lock(*tray_preferences_mutex);
             *tray_preferences = std::move(menu);
           }
-          voice_theme->store(surface_mode, std::memory_order_release);
           // The settings page owns this too; without reconciling it here the
           // toolbar only followed the preference across a restart.
           const auto toolbar_preferences =
@@ -1389,60 +1361,6 @@ int wmain(int argc, wchar_t **argv) {
               preferences.value("navigation", nlohmann::json::object())
                   .value("mouse_wheel", false),
               std::memory_order_release);
-          const auto input = preferences.value("voice_input", nlohmann::json::object());
-          VoiceInputConfig next;
-          next.capture = voice_capture_selection(input);
-          next.enabled = input.value("enabled", true);
-          // 开始、结束提示音只跟总开关 sound_enabled：设置页不再给这两个开关（`voice_cue_switches` 为 false），存下的值不再读，start_sound、end_sound 保持默认的 true。
-          next.sound_enabled = input.value("sound_enabled", true);
-          next.mute_system_audio = input.value("mute_system_audio", false);
-          next.hotkey_ralt = input.value("hotkey_ralt", true);
-          next.hotkey_ctrl_f9 = input.value("hotkey_ctrl_f9", true);
-          const auto voice_chord = msime::host_api::decode_toggle_hotkey(preferences, "voice_input");
-          next.toggle_hotkey = {toggle_key_code(voice_chord.key), voice_chord.ctrl,
-                               voice_chord.alt, voice_chord.shift, voice_chord.meta};
-          next.hotkey_ctrl_win = input.value("hotkey_ctrl_win", false);
-          next.hotkey_rctrl_ralt = input.value("hotkey_rctrl_ralt", false);
-          // 空格锁定固定为开（hotkey_hold_space_lock 保持默认的 true）：空格只在按住录音组合键期间才被拦下，平常打字不受影响，设置页也不再给这个开关（`voice_space_lock_switch`）。
-          next.stream_inline_preedit = input.value("stream_inline_preedit", true);
-          next.commit_mode = input.value("commit_mode", std::string{"tsf"});
-          next.punctuation_mode = input.value("punctuation_mode", std::string{"auto"});
-          next.endpoint = input.value("asr_endpoint", std::string{});
-          next.model = input.value("asr_model", std::string{});
-          // Read before the tokens: the slot lookup is keyed on them.
-          next.asr_provider = input.value("asr_provider", std::string{"local"});
-          next.asr_model_path = input.value("asr_model_path", std::string{});
-          next.host_options = voice_host_options;
-          next.polish_provider = input.value("polish_provider", std::string{});
-          next.token = provider_token(input, "asr_tokens", "asr_token",
-                                      next.asr_provider);
-          next.app_key = input.value("asr_app_key", std::string{});
-          next.doubao_auth_mode = input.value("doubao_auth_mode", std::string{});
-          next.resource_id = doubao_resource_id(input.value("asr_resource_id", std::string{}));
-          next.enable_itn = input.value("doubao_enable_itn", true);
-          next.enable_punc = input.value("doubao_enable_punc", true);
-          next.enable_ddc = input.value("doubao_enable_ddc", false);
-          next.boosting_table_id = input.value("doubao_boosting_table_id", std::string{});
-          next.language = input.value("language", std::string{"zh-cn"});
-          next.polish_enabled = input.value("polish_enabled", false);
-          next.polish_text = input.value("polish_text", false);
-          next.polish_token = provider_token(input, "polish_tokens",
-                                             "polish_token",
-                                             next.polish_provider);
-          next.polish_thinking = input.value("polish_thinking", std::string{"disabled"});
-          next.polish_endpoint = input.value("polish_endpoint", std::string{});
-          next.polish_model = input.value("polish_model", std::string{});
-          next.polish_prompt_id = input.value("polish_prompt_id", std::string{"cleanup"});
-          next.polish_prompt_custom_1 = input.value("polish_prompt_custom_1", std::string{});
-          next.polish_prompt_custom_2 = input.value("polish_prompt_custom_2", std::string{});
-          next.polish_prompt_custom_3 = input.value("polish_prompt_custom_3", std::string{});
-          next.traditional_output =
-              preferences.value("traditional_chinese_output", false) &&
-              msime::windows::scheme::ScriptConversionApplies(msime::windows::scheme::scheme_from_name(
-                  running_scheme(preferences, language_dictionaries)));
-          std::lock_guard lock(*voice_config_mutex);
-          *voice_config = std::move(next);
-        };
     auto session_options = prepared.at("value");
     name_builtin_sound_packs(session_options, config.state_root);
     name_builtin_helpcodes(session_options, config.state_root);
@@ -1509,74 +1427,6 @@ int wmain(int argc, wchar_t **argv) {
       // 补查构造期间已完成、当时尚无回调接收的偏好写入。
       wake_preferences->second();
     }
-    // Its palette is applied once the theme is resolved, alongside the toolbar's.
-    startup_stage = "voice_overlay";
-    WaveOverlay voice_overlay;
-    VoiceInputSession *voice_session = nullptr;
-    if (!voice_overlay.init(
-            GetModuleHandleW(nullptr), [&voice_session](WaveOverlay::Action action) {
-              if (!voice_session)
-                return;
-              if (action == WaveOverlay::Action::Cancel)
-                voice_session->cancel();
-              else if (voice_session->recording())
-                voice_session->stop();
-              // 识别或润色中点 ✓：只收起浮层，结果照常上屏，与 macOS 一致。
-              else
-                voice_session->dismiss_processing();
-            }))
-      throw std::runtime_error("Voice overlay unavailable");
-    startup_stage = "voice_session";
-    auto voice = std::make_unique<VoiceInputSession>(
-        voice_overlay,
-        [&] {
-          const auto view = server.mode_view();
-          return view ? std::optional<FocusLease>(view->lease) : std::nullopt;
-        },
-        [&](const FocusLease &lease, uint32_t message, std::wstring_view text,
-            wchar_t generation) {
-          return server.send_voice_composition(lease, message, text, generation);
-        },
-        [voice_config, voice_config_mutex] {
-          std::lock_guard lock(*voice_config_mutex);
-          return *voice_config;
-        },
-        [&](const FocusLease &lease) { return server.focus_current(lease); },
-        // 原生语音上屏的文字记入打字统计，来源 voice；统计关闭时共享入口自己什么也不写。全屏应用前台时里程碑提示音保持安静，与其他统计来源一致。
-        [statistics_directory = config.state_root.u8string()](const std::string &text) {
-          record_typing_statistics_async(
-              statistics_directory, text, TypingSource::Voice,
-              foreground_is_fullscreen(GetForegroundWindow()));
-        });
-    voice_session = voice.get();
-    VoiceControllerMailbox voice_controller_mailbox;
-    VoiceControllerDispatch voice_controller_dispatch(
-        {[&]() -> std::optional<FocusLease> {
-           const auto view = server.mode_view();
-           return view ? std::optional<FocusLease>(view->lease) : std::nullopt;
-         },
-         [&](const FocusLease &lease) { return server.focus_current(lease); },
-         [&](std::string_view language) {
-           return voice->start_review(language);
-         },
-         [&](const auto &result) { return voice->stop_review(result); },
-         [&](const auto &result) { return voice->cancel_review(result); }});
-    DWORD voice_controller_error = ERROR_SUCCESS;
-    auto voice_controller = VoiceControllerListener::create(
-        voice_controller_mailbox, voice_controller_error);
-    if (!voice_controller)
-      notice("Voice controller unavailable; native input remains enabled");
-    configure_audio_mute_state_path(
-        (config.state_root / "voice_system_audio_mute_state.txt").wstring());
-    (void)voice->init_cues(voice_audio_path(config, L"start.mp3"),
-                           voice_audio_path(config, L"end.mp3"));
-    VoiceHotkeyController voice_hotkeys(
-        *voice,
-        [voice_config, voice_config_mutex] {
-          std::lock_guard lock(*voice_config_mutex);
-          return *voice_config;
-        },
-        [&] { return server.mode_view().has_value(); });
     ClipboardMonitor clipboard_monitor(
         clipboard_history, [&](std::string text) {
           const auto request = nlohmann::json{
@@ -1843,11 +1693,6 @@ int wmain(int argc, wchar_t **argv) {
     // 应用例外按焦点客户端的进程查，结果留到换客户端为止，免得每一轮都去开进程句柄。
     uint32_t mode_rule_pid = 0;
     std::optional<bool> mode_rule;
-    // The voice overlay draws the theme too, in its own light/dark mode, as the tray menu does.
-    bool voice_dark_applied = !surface_theme_is_light(
-        voice_theme->load(std::memory_order_acquire), system_dark);
-    uint64_t voice_theme_applied = candidate_theme_generation;
-    voice_overlay.set_palette(surface_palette(voice_dark_applied));
     toolbar.set_scale(config.floating_toolbar_scale);
     toolbar.set_font_size(config.floating_toolbar_font_size);
     toolbar.set_items(config.floating_toolbar_items);
@@ -1945,14 +1790,11 @@ int wmain(int argc, wchar_t **argv) {
       const auto request = shell_surface_request(TrayMenuCommand::OpenHandwritingPanel);
       if (request) (void)launch_shell(*request);
     });
-    // 与托盘的语音一行和语音快捷键的切换走同一个会话：没在录就开始，在录就结束。
-    toolbar.set_voice_action([&] { (void)voice->toggle(); });
     TrayMenuCapabilities menu_capabilities;
     menu_capabilities.emoji_panel = true;
     // 手写模型只认汉字，不提供手写的版本（日文、越南文和藏文版）托盘菜单里没有手写，安装包里也没有手写模型。
     menu_capabilities.handwriting_panel = preview_shell.has_value() && MSIME_EDITION_HANDWRITING != 0;
     menu_capabilities.keyboard_panel = true;
-    menu_capabilities.voice_input = true;
     menu_capabilities.settings = settings_shell.has_value();
     menu_capabilities.cloud_clipboard = preview_shell.has_value();
     menu_capabilities.cloud_dictionary = preview_shell.has_value();
@@ -2032,8 +1874,6 @@ int wmain(int argc, wchar_t **argv) {
               toolbar.hide();
             return true;
           }
-          if (command == TrayMenuCommand::ToggleVoiceInput)
-            return voice->toggle();
           if (command == TrayMenuCommand::OpenEmojiPanel)
             return open_emoji();
           if (command == TrayMenuCommand::OpenKeyboardPanel)
@@ -2463,12 +2303,6 @@ int wmain(int argc, wchar_t **argv) {
       }
       if (stopping.load())
         break;
-      voice_hotkeys.refresh();
-      voice->maintain();
-      voice_controller_dispatch.maintain();
-      if (auto request = voice_controller_mailbox.take())
-        request->complete(voice_controller_dispatch.dispatch(request->channel,
-                                                             request->request));
       if (auto fonts = candidate_fonts->take())
         candidate_settings.fonts = *fonts;
       if (auto style = candidate_style->take())
@@ -2557,13 +2391,6 @@ int wmain(int argc, wchar_t **argv) {
         toolbar.set_settings(*settings);
       if (mode_hud)
         mode_hud->set_show_logo(input_mode_hud_logo->load(std::memory_order_acquire));
-      if (const bool dark = !surface_theme_is_light(
-              voice_theme->load(std::memory_order_acquire), system_dark);
-          dark != voice_dark_applied || voice_theme_applied != candidate_theme_generation) {
-        voice_dark_applied = dark;
-        voice_theme_applied = candidate_theme_generation;
-        voice_overlay.set_palette(surface_palette(dark));
-      }
       if (const bool dark = !surface_theme_is_light(
               menu_theme->load(std::memory_order_acquire), system_dark);
           dark != menu_dark_applied || menu_theme_applied != candidate_theme_generation) {
@@ -2814,9 +2641,6 @@ int wmain(int argc, wchar_t **argv) {
       notice(std::move(line));
     // Stop I/O first; it invalidates queued work without waiting for this
     // thread. Retire the matching review before Server/focus teardown.
-    if (voice_controller)
-      voice_controller->stop();
-    voice_controller_dispatch.retire();
     toolbar.hide();
     // Stop the listener and close the mailbox before the window goes away, so a
     // late anchor cannot reach a card that is being destroyed.
