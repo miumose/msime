@@ -401,8 +401,6 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
        capabilities.keyboard_panel, false, false);
   tool(TrayMenuCommand::OpenHandwritingPanel, "手写", 0xE70F, L"写",
        capabilities.handwriting_panel, false, false);
-  tool(TrayMenuCommand::ToggleVoiceInput, "语音", 0xE720, L"音",
-       capabilities.voice_input, false, false);
   separator();
   // 云剪贴板和云词库紧接在表情所在的工具条之后，macOS 把它们排在表情面板之后、屏幕键盘之前；工具条放不下第六、七格，各占一行。云剪贴板面板像表情面板的剪贴板页一样把条目输入编辑器。
   row(TrayMenuCommand::OpenCloudClipboard, "云剪贴板…",

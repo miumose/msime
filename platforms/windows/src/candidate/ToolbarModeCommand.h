@@ -69,7 +69,6 @@ tray_menu_mode_command(TrayMenuCommand command, std::optional<bool> chinese,
   case TrayMenuCommand::OpenEmojiPanel:
   case TrayMenuCommand::OpenHandwritingPanel:
   case TrayMenuCommand::OpenKeyboardPanel:
-  case TrayMenuCommand::ToggleVoiceInput:
   case TrayMenuCommand::OpenSettings:
   case TrayMenuCommand::OpenAbout:
   case TrayMenuCommand::ToggleTranslations:

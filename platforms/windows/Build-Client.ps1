@@ -48,13 +48,12 @@ $buildRoot = Join-Path $RepoRoot "target/windows-$Edition"
 foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
                          'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
                          'platforms/windows/settings/MSIME.Settings.vcxproj',
-                         'scripts/fetch_voice_runtime.py')) {
+                         )) {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relative) -PathType Leaf)) {
         throw "Missing Client build source: $relative"
     }
 }
 # The on-device speech runtime staged beside the Server; Prepare-PackageFiles.ps1 and install-smoke.ps1 name the same three files.
-$voiceRuntimeLibraries = @('sherpa-onnx-c-api.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll')
 $previousPrefix = $env:CMAKE_PREFIX_PATH
 # The ARM64 host DLL that the native half of the Arm64X TIP imports (edition_windows.py arm64_host_dll): it sits beside the x64 host in the same version directory.
 $arm64HostDll = [IO.Path]::GetFileNameWithoutExtension($hostDll) + '_arm64.dll'
@@ -126,13 +125,6 @@ try {
         }
     }
     $env:CMAKE_PREFIX_PATH = $X64Dependencies
-    # The Server recognizes speech on-device through the pinned sherpa-onnx runtime (resources/voice-runtime.lock.json), which it loads with LoadLibrary from its own directory; onnxruntime.dll resolves beside sherpa-onnx-c-api.dll. The fetch verifies the archive's SHA-256 before extracting and reuses a verified copy on later runs. These are upstream MSVC /MD builds, so they need the same VC runtime the installer already requires.
-    $voiceRuntime = Join-Path $RepoRoot 'target/voice-runtime/windows-x64'
-    Invoke-ClientBuild python @((Join-Path $RepoRoot 'scripts/fetch_voice_runtime.py'),
-        '--platform', 'windows-x64', '--out', $voiceRuntime)
-    Invoke-ClientBuild cmake (@('-E', 'copy_if_different') +
-        @($voiceRuntimeLibraries | ForEach-Object { Join-Path $voiceRuntime $_ }) +
-        @((Join-Path $buildRoot 'x64/bin')))
     # Windows on Arm: the 64-bit TIP there is Arm64X (tsf/CMakeLists.txt, MSIME_TSF_ARM64X), linked from an ARM64 and an ARM64EC build of the same sources. Its ARM64 half imports the ARM64 host (Build-RustOutputs.ps1, with a static C runtime like the TIP's, so it needs no ARM64 Visual C++ runtime) under its own name; its ARM64EC half runs in emulated x64 processes and imports the x64 host. Everything else stays x64 and runs emulated. The TIP takes only header-only libraries from its prefix, so both passes use the x64 one.
     $arm64Release = Join-Path $rust 'arm64'
     $arm64Output = Join-Path $buildRoot 'arm64'
@@ -170,9 +162,6 @@ try {
             & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $bin $dll) -Architecture $arch -Kind dll
         }
         if ($arch -eq 'x64') {
-            foreach ($dll in $voiceRuntimeLibraries) {
-                & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $bin $dll) -Architecture x64 -Kind dll
-            }
             foreach ($exe in @('MetasequoiaImeServer.exe', 'MetasequoiaImeWatchdog.exe',
                 'msime-client-prepare.exe', 'msime-client-settings.exe')) {
                 & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $bin $exe) -Architecture x64 -Kind exe

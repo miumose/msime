@@ -16,7 +16,6 @@ inline bool draw_toolbar_vector_icon(ID2D1RenderTarget *target, int button,
   case kToolbarEmoji:
   case kToolbarHandwriting:
   case kToolbarScreenKeyboard:
-  case kToolbarVoice:
   case kToolbarSettings:
     break;
   default:
@@ -100,7 +99,6 @@ inline bool draw_toolbar_vector_icon(ID2D1RenderTarget *target, int button,
             D2D1::RoundedRect({x - 0.7f, y - 0.6f, x + 0.7f, y + 0.6f}, 0.3f, 0.3f), brush);
     line(8, 16, 16, 16);
     break;
-  case kToolbarVoice:
     target->DrawRoundedRectangle(D2D1::RoundedRect({9, 2.5f, 15, 14.5f}, 3, 3),
                                  brush, width, stroke.Get());
     curve({5.5f, 11.5f}, {5.5f, 20.5f}, {18.5f, 20.5f}, {18.5f, 11.5f});

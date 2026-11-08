@@ -33,9 +33,8 @@ enum ToolbarButton {
   kToolbarEmoji = 4,
   kToolbarScreenKeyboard = 5,
   kToolbarSettings = 6,
-  // 手写和语音回到工具栏时沿用它们原来的 7 和 8，含义没有变。9 曾经是「关于」，现在在设置按钮的右键菜单里，这个 id 不再分配，免得旧布局指到别的按钮。
+  // 手写沿用原来的 7。8 曾经是语音，9 曾经是「关于」，两个 id 都不再分配，免得旧布局指到别的按钮。
   kToolbarHandwriting = 7,
-  kToolbarVoice = 8,
   kToolbarHide = 10,
   // 切换输入方案，点开列出这个版本提供的方案。
   kToolbarInputScheme = 11,
@@ -127,8 +126,6 @@ inline ToolbarIcon toolbar_icon(int button, std::optional<bool> state,
   // 手写和语音与托盘工具条用同一个字形和替代字。
   case kToolbarHandwriting:
     return {0xE70F, L"写"};
-  case kToolbarVoice:
-    return {0xE720, L"音"};
   // BulletedList，对应 macOS 的 list.bullet。
   case kToolbarInputScheme:
     return {0xE8FD, L"方"};

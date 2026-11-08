@@ -32,7 +32,6 @@ inline const char *toolbar_accessible_automation_id(int button) {
     return "MetasequoiaFloatingToolbarHandwriting";
   case kToolbarScreenKeyboard:
     return "MetasequoiaFloatingToolbarScreenKeyboard";
-  case kToolbarVoice:
     return "MetasequoiaFloatingToolbarVoice";
   case kToolbarSettings:
     return "MetasequoiaFloatingToolbarSettings";

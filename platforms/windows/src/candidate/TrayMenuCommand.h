@@ -7,7 +7,6 @@ enum class TrayMenuCommand {
   OpenEmojiPanel,
   OpenHandwritingPanel,
   OpenKeyboardPanel,
-  ToggleVoiceInput,
   OpenSettings,
   OpenAbout,
   // Input mode rows, sent to the focused TIP over the same worker protocol the floating toolbar uses.

@@ -83,7 +83,6 @@ inline std::wstring toolbar_tooltip(int button, std::optional<bool> state,
     return L"打开水杉手写识别板";
   case kToolbarScreenKeyboard:
     return panels ? L"打开水杉屏幕键盘" : L"打开系统屏幕键盘";
-  case kToolbarVoice:
     return L"开始或结束语音输入";
   case kToolbarSettings:
     return L"打开" + std::wstring(product) + L"设置";

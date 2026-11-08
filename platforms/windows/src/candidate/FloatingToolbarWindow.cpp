@@ -280,7 +280,6 @@ void FloatingToolbarWindow::run(size_t position, const ModePresentation &value, 
     settings_action_();
   else if (slot == kToolbarHandwriting && handwriting_action_)
     handwriting_action_();
-  else if (slot == kToolbarVoice && voice_action_)
     voice_action_();
   else if (slot == kToolbarInputScheme && input_scheme_action_)
     input_scheme_action_(menu_anchor(position, x));
