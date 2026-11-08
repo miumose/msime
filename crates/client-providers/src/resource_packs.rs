@@ -1,6 +1,6 @@
 //! 按需下载的资源包：macOS 和 Android 发布包不再内置的日文词典、粤拼/注音/笔画词库，桌面发布包不再内置的手写模型和桌面落定重排模型，Android 发布包不再内置的离线释义词典、英文音标表、本地语音运行库和「增强」逐键重排的 ONNX 模型，以及 macOS 发布包不再内置的五笔码表和本地语音运行库。
 //!
-//! 每个资源包安装在 `<state_root>/resource-packs/<id>/`，文件平铺，最后写入的 `msime-model.json` 标记安装完整。固定资源的文件名、URL、长度和 SHA-256 来自仓库内审过的锁文件，下载、校验、暂存和整体发布复用 [`crate::voice::local_models::install_files`]；会原地替换的万象 LTS 使用响应长度和 `.gram` 格式校验，语音运行库从固定的归档里取出文件，见 [`ResourcePack::archive`]。
+//! 每个资源包安装在 `<state_root>/resource-packs/<id>/`，文件平铺，最后写入的 `msime-model.json` 标记安装完整。固定资源的文件名、URL、长度和 SHA-256 来自仓库内审过的锁文件，下载、校验、暂存和整体发布复用 [`crate::local_models::install_files`]；会原地替换的万象 LTS 使用响应长度和 `.gram` 格式校验，语音运行库从固定的归档里取出文件，见 [`ResourcePack::archive`]。
 //!
 //! 锁文件还没有固定内容的资源包（[`ResourcePack::pinned`] 为假，包括 macOS 语音运行库和 Android OCR 模块在第一次发布之前）不存在：[`ResourcePack::from_id`] 认不出它，[`list`] 不列出它，安装、导入和收编都报 `local_model_unknown`。
 
@@ -8,7 +8,7 @@ mod local_translation;
 pub use local_translation::verified_model as verified_translation_model;
 
 use crate::resources::{ResourceSet, ON_DEMAND_JAPANESE_ARTIFACTS, ON_DEMAND_WUBI_ARTIFACTS};
-use crate::voice::local_models::{self, InstallProgress, LocalModelError, MANIFEST_FILE};
+use crate::local_models::{self, InstallProgress, LocalModelError, MANIFEST_FILE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -2817,7 +2817,7 @@ mod tests {
             size: bytes.len() as u64,
         };
 
-        let result = crate::voice::local_models::adopt_files(
+        let result = crate::local_models::adopt_files(
             &root.path().join("models"),
             "fixture",
             &[file],
@@ -2827,7 +2827,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(crate::voice::local_models::LocalModelError::InvalidRoot)
+            Err(crate::local_models::LocalModelError::InvalidRoot)
         ));
         assert_eq!(fs::read(source_real.join("fixture.bin")).unwrap(), bytes);
     }

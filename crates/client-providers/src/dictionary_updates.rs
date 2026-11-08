@@ -1,6 +1,6 @@
 //! 官方词库独立更新。网络只发生在设置宿主的后台任务，输入宿主只读取已校验的资源代次。
 
-use crate::voice::local_models::{self, Fetched, Fetcher, LocalModelError};
+use crate::local_models::{self, Fetched, Fetcher, LocalModelError};
 use crate::{file_lock, resources, storage};
 use resources::{Artifact, ResourceSet, ResourceStore};
 use serde::{Deserialize, Serialize};

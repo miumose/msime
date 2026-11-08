@@ -2,8 +2,6 @@
 //! supplies. Nothing here stores or logs a secret; the probes report only
 //! whether a credential was accepted.
 
-pub mod asr;
-pub mod doubao;
 pub mod doubao_auth;
 pub mod probe;
 pub mod translation;
@@ -30,12 +28,6 @@ pub(crate) fn valid_https_endpoint_and_model(endpoint: &str, model: &str) -> boo
 
 /// 设置页「测试配置」按钮背后的检查，给自己发请求的宿主用（Tauri 设置在 Windows 和 macOS 上，以及原生 Windows 设置窗口经 `msime_client_test_api_credential`）：`voice.asr` 是豆包时走它的 WebSocket，其余识别服务走 HTTP 上传；`translation.tencent`、`translation.niutrans`、`translation.custom` 各发一次翻译；`ai.assistant` 和 `voice.polish` 发一次最短的对话。`config` 是设置页给的同一份配置。配置不完整时直接回答、不联网；否则会联网，最长约 15 秒，不要在界面线程上调用。
 pub fn test_service(service: &str, config: &serde_json::Value) -> probe::ProbeResult {
-    if service == "voice.asr" {
-        if config.get("provider").and_then(serde_json::Value::as_str) == Some("doubao") {
-            return doubao::test(config, &doubao::WebSocketTransport);
-        }
-        return asr::test(config, &asr::HttpTransport);
-    }
     // 「AI 辅助」翻译用的是同一套 Chat Completions 凭据，测试与 ai.assistant 走同一条探测。
     if service == "translation.ai" {
         return probe::test_chat("ai.assistant", config, &probe::ChatProbeTransport);

@@ -1,4 +1,4 @@
-//! Session lifetime and the voice capture cycle that belongs to one session.
+//! Session lifetime.
 //!
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
@@ -273,7 +273,6 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
                 statistics_recorded_elsewhere,
                 ai_credential: None,
                 ai_provider_cache,
-                voice: VoiceSessionState::default(),
                 pending_selections: Default::default(),
                 pending_efficiency: Default::default(),
                 statistics_enabled: None,
@@ -381,88 +380,3 @@ pub extern "C" fn msime_client_release_gloss_caches() {
     release_gloss_caches();
 }
 
-#[no_mangle]
-pub extern "C" fn msime_client_voice_start(handle: u64) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            let generation = session.voice.start();
-            if generation == 0 {
-                return Err("voice generation exhausted".into());
-            }
-            Ok(json!(generation))
-        })
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn msime_client_voice_cancel(handle: u64) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            session.voice.cancel();
-            Ok(Value::Null)
-        })
-    })
-}
-
-/// Capture a bounded PCM16-compatible sample buffer from the default input device. The returned JSON contains only the samples for this call; callers must transport them immediately and must not log or persist them.
-#[no_mangle]
-pub extern "C" fn msime_client_voice_capture(milliseconds: u32) -> *mut c_char {
-    response(|| {
-        if !(1..=60_000).contains(&milliseconds) {
-            return Err("invalid voice capture duration".into());
-        }
-        let samples = crate::voice_capture::capture_audio(milliseconds);
-        if samples.is_empty() {
-            return Err("voice capture unavailable".into());
-        }
-        Ok(
-            json!({ "sample_rate": crate::voice_capture::SAMPLE_RATE, "channels": 1, "samples": samples }),
-        )
-    })
-}
-
-/// The microphones the settings page offers under 「可用录音设备」, the listing the Tauri settings shell's `list_voice_capture_devices` gives on Windows: value `[{backend:"windows", id, label}]`, `id` being `wasapi:` and the WASAPI endpoint id as four lowercase hex digits per UTF-16 unit, at most 128 entries, `[]` when no capture endpoint is available. Other targets fail with "voice capture devices unavailable": their hosts list devices their own way. Enumerates through COM: call off the UI thread. Ids and labels may identify the user's hardware: never log them.
-#[no_mangle]
-pub extern "C" fn msime_client_voice_capture_devices() -> *mut c_char {
-    response(|| {
-        #[cfg(target_os = "windows")]
-        {
-            Ok(Value::Array(crate::voice_capture_device_values(
-                "windows",
-                crate::voice_capture::capture_devices(),
-            )))
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err("voice capture devices unavailable".into())
-        }
-    })
-}
-
-/// Apply asynchronous ASR text only for the active voice token.
-///
-/// # Safety
-/// `text` must point to a readable UTF-8 buffer of `length` bytes and must not
-/// be null. The buffer is not retained.
-#[no_mangle]
-pub unsafe extern "C" fn msime_client_voice_apply(
-    handle: u64,
-    generation: u64,
-    text: *const u8,
-    length: usize,
-) -> *mut c_char {
-    response(|| {
-        if text.is_null() || length > 65536 {
-            return Err("invalid voice text buffer".into());
-        }
-        let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, length) })
-            .map_err(|_| "voice text is not UTF-8")?;
-        with_session(handle, |session| {
-            Ok(session
-                .voice
-                .apply(generation, text)
-                .map(Value::String)
-                .unwrap_or(Value::Null))
-        })
-    })
-}

@@ -34,10 +34,6 @@ use msime_client_core::punctuation::{
 };
 use msime_client_core::resources::{ResourceSet, ResourceStore, VerifiedMarker};
 use msime_client_providers::resource_packs::{self, ResourcePack};
-use msime_client_providers::voice::doubao_frame::{
-    audio_frame, decode_error_code, decode_json_frame, start_frame,
-};
-use msime_client_providers::voice::VoiceSessionState;
 use msime_client_services::typing_statistics::{
     CommitEfficiency, TypingSource, TypingStatisticsStore, RANKS,
 };
@@ -203,37 +199,11 @@ mod plugin_tables;
 mod read_only_state;
 // 脚本插件：进程开关、每会话的实例和进程级的模块缓存、熔断。移动端是空壳。
 mod scripts;
-mod voice_capture;
 pub use dictionary_snapshot::{
     inspect_snapshot_json, msime_client_snapshot_discard, msime_client_snapshot_inspect,
     msime_client_snapshot_prepare, msime_client_snapshot_queue, msime_client_snapshot_restore,
     msime_client_snapshot_version, snapshot_queue_json,
 };
-
-/// Capture endpoint identities paired with labels. Neither belongs in logs.
-pub fn voice_capture_devices() -> Vec<(String, String)> {
-    voice_capture::capture_devices()
-}
-
-/// A device listing as the shared settings page's 「可用录音设备」 reads it: `[{backend, id, label}]` in listing order, `backend` the value `voice_input.capture_backend` takes when the user picks the device and `id` the one `voice_input.capture_device` takes. The Tauri settings shell (Windows and macOS) and `msime_client_voice_capture_devices` both shape their listing here.
-pub fn voice_capture_device_values(backend: &str, devices: Vec<(String, String)>) -> Vec<Value> {
-    devices
-        .into_iter()
-        .map(|(id, label)| json!({"backend": backend, "id": id, "label": label}))
-        .collect()
-}
-
-/// Capture bounded mono 16 kHz PCM for a platform host.
-pub fn voice_capture_pcm(milliseconds: u32) -> Result<Vec<f32>, &'static str> {
-    if !(1..=60_000).contains(&milliseconds) {
-        return Err("invalid voice capture duration");
-    }
-    let samples = voice_capture::capture_audio(milliseconds);
-    if samples.is_empty() {
-        return Err("voice capture unavailable");
-    }
-    Ok(samples)
-}
 
 /// Run the optional offline Engine handwriting recognizer for a panel host. The caller must provide a trusted absolute model path. The shared panel uses a 420 by 420 canvas, which is also the coordinate space passed to the Engine. This path needs no provider socket, so every host can use it.
 pub fn handwriting_local_candidates(
@@ -331,7 +301,6 @@ struct HostSession {
     ai_credential: Option<SessionAiCredential>,
     /// Cached copy used by every online query until preferences change.
     ai_provider_cache: Option<AiAssistantProviderConfig>,
-    voice: VoiceSessionState,
     /// Committing candidate selections counted but not yet written to typing statistics, indexed by one-based position minus one, with every position past a page in the last slot. See `SELECTION_BATCH`.
     pending_selections: [u64; RANKS + 1],
     /// 还没写进打字统计的上屏，和 `pending_selections` 一起写。只在 [`COUNTS_COMMIT_EFFICIENCY`] 时计；读音在写入时于后台线程查，不在输入线程上查。

@@ -23,12 +23,12 @@ use std::time::Duration;
 pub const MANIFEST_FILE: &str = "msime-model.json";
 const MODEL_LOCK_FILE: &str = ".models.lock";
 
-const CATALOG_JSON: &str = include_str!("../../../../resources/local-asr-models.json");
+const CATALOG_JSON: &str = include_str!("../../../resources/local-asr-models.json");
 
 /// Files the catalog ships inside the repository rather than downloading, by their `resource` name.
 const EMBEDDED_RESOURCES: &[(&str, &[u8])] = &[(
     "x-asr-zh-en-bpe.vocab",
-    include_bytes!("../../../../resources/voice-models/x-asr-zh-en-bpe.vocab"),
+    include_bytes!("../../../resources/voice-models/x-asr-zh-en-bpe.vocab"),
 )];
 
 const CHUNK: usize = 64 * 1024;
