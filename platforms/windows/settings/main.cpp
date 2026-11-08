@@ -14431,13 +14431,6 @@ private:
                                           [this, pack] { install_sentence_pack(pack, true); }, loaded_);
       A11y::SetAutomationId(import_button, L"sentence-model-import-" + pack);
       actions.Children().Append(import_button);
-      for (auto const &entry : sentence_pack_statuses_) {
-        if (entry.id != pack || entry.import_files.empty())
-          continue;
-        auto offline = offline_install_text(entry.import_files);
-        A11y::SetAutomationId(offline, L"sentence-model-offline-" + pack);
-        below.Children().Append(offline);
-      }
     }
     if (view.update)
       actions.Children().Append(
@@ -25975,6 +25968,36 @@ private:
   std::wstring keyboard_photo_source_;
   Imaging::BitmapImage keyboard_photo_{nullptr};
 
+
+  // 资源包导入时列出的文件（名称、下载地址、字节数），只用于说明。
+  struct SentencePackFile {
+    std::wstring name, url;
+    double size = 0;
+  };
+  // 「输入」页「候选与联想」「逐个模式」「辅助码」三处「更多选项」是否展开，跨页面重建保留。
+  bool candidates_more_open_ = false;
+  bool local_modes_more_open_ = false;
+  bool helpcode_more_open_ = false;
+  // Windows 原生设置页的神经联想与 octagram 语法模型资源包状态读到了哪一步（SentencePackModel.h）。
+  spk::Catalog sentence_packs_;
+  // msime_client_resource_packs 的一项：安装状态，和不联网安装时要用浏览器下载、再从文件导入的文件。
+  struct SentencePackStatus {
+    std::wstring id, state;
+    std::vector<SentencePackFile> import_files;
+  };
+  std::vector<SentencePackStatus> sentence_pack_statuses_;
+  std::set<std::wstring> sentence_pack_installing_;
+  // 正在安装的资源包里，从文件导入（而不是联网下载）的那些；副标题据此说「导入」。
+  std::set<std::wstring> sentence_pack_importing_;
+  // 每个资源包最近一次下载或导入失败的说明，画在它那一行里；重新开始安装时清掉。取消不算失败，不留说明。
+  std::map<std::wstring, std::wstring> sentence_pack_errors_;
+  std::set<std::wstring> sentence_pack_removing_;
+  std::set<std::wstring> grammar_updates_available_;
+  bool grammar_updates_checking_ = false;
+  std::wstring grammar_updates_notice_;
+  // 「输入 › 候选与联想」云候选服务的草稿（共享页 CloudCandidatesSection 的组件状态）和它出自的那份文档配置（序列化后的文字）；文档里的配置变了草稿作废。
+  std::optional<JsonObject> cloud_provider_draft_;
+  std::wstring cloud_provider_base_;
 
   // 「AI 辅助」页（共享页 useAiAssistant 的状态，跨页面重建保留）：已获取的模型和获取的提示，获取是否在进行。ai_generation_ 在每次改 AI 设置时递增，作废进行中的获取；获取请求的序号作废更早的获取。「自定义提示词」折叠区是否展开，与共享页 MoreOptions 一样默认收起。随输入就地更新的控件每次绘制时重建。
   std::optional<std::vector<std::wstring>> ai_models_;
