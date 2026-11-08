@@ -5,8 +5,6 @@ name: zh windows cross build
 # Linux runner the same way ci-platforms.yml does, without Depot runners.
 on:
   workflow_dispatch:
-  push:
-    branches: [zh-only]
 
 permissions:
   contents: read
