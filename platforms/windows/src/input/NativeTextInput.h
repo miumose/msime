@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef _WIN32
-#include <Windows.h>
+#include <windows.h>
 
 #include <string_view>
 #include <vector>

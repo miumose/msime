@@ -568,26 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn other_schemes_have_no_symbol_rows() {
-        let profile = crate::shuangpin::profile::default_profile();
-        for scheme in [
-            SchemeType::Wubi,
-            SchemeType::JapaneseRomaji,
-            SchemeType::Korean,
-            SchemeType::Cantonese,
-            SchemeType::Zhuyin,
-            SchemeType::Stroke,
-            SchemeType::Vietnamese,
-            SchemeType::Tibetan,
-        ] {
-            assert!(
-                query_mixed_symbols("zhengfu", scheme, profile).is_empty(),
-                "{scheme:?}"
-            );
-        }
-    }
-
-    #[test]
     fn names_sharing_a_spelling_give_each_symbol_once() {
         // 西格马、西格玛同音，σ Σ 各出一次，两个名称都是锚定词，按表的先后。
         let rows = quanpin("xigema");

@@ -115,29 +115,3 @@ fn commit_raw_without_learning_commits_the_same_text_and_learns_nothing() {
     );
 }
 
-/// 不要求 `msime-english.db` 的方案集合（这里只有韩语）、代次里也没有它时，专用英文里回车照常上屏，不学词、不报诊断，也不在代次里建一个空的英文库。要求它的集合缺了它仍由学词建出来，与以前相同。
-#[test]
-fn enter_learns_nothing_without_an_english_dictionary_the_schemes_do_not_need() {
-    let fixture = Fixture::new(QUANPIN_FIXTURE);
-    let english = fixture.path().join(assets::ENGLISH_DICTIONARY);
-    let mut session = fixture.session_with(|options| {
-        options.scheme = SchemeType::Korean;
-        options.enabled_schemes = SchemeSet::of(&[SchemeType::Korean]);
-        options.learn_typed_spellings_on_enter = true;
-    });
-    session.set_dedicated_english(true);
-    type_text(&mut session, "Zyzzyva");
-    let result = session.command(Command::CommitRaw);
-    assert_eq!(result.commit.as_deref(), Some("Zyzzyva"));
-    assert_eq!(result.diagnostic, None);
-    assert!(!english.exists());
-
-    let mut chinese = fixture.session();
-    chinese.set_dedicated_english(true);
-    type_text(&mut chinese, "Zyzzyva");
-    assert_eq!(
-        chinese.command(Command::CommitRaw).commit.as_deref(),
-        Some("Zyzzyva")
-    );
-    assert_eq!(learned(&fixture, "zyzzyva"), 1);
-}

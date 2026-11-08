@@ -477,8 +477,6 @@ mod desktop {
                 && snapshot.conversion.is_empty()
                 && !snapshot.caret_edit_suffix
                 && !snapshot.candidate_list_open
-                // 网格辅助码筛过的列表按匹配等级分组，插件的重排和隐藏会跨组。
-                && !snapshot.grid_helpcode_constrained
         }
 
         /// 内置排序之后调用：派发类调用里运行插件、记下它们的操作，其余调用只重放记下的操作。返回隐藏的行数或注释是否变了（重排由调用方比较数组得知）。
@@ -631,7 +629,6 @@ mod desktop {
                         snapshot.candidate_sources[seat],
                         CLOUD | CLOUD_PENDING | AI | AI_PENDING
                     )
-                    || (seat == 0 && snapshot.wubi_unique_four_code)
             };
             let listed = |list: &[Identity], seat: usize| {
                 list.iter()
@@ -707,8 +704,6 @@ mod desktop {
         fn inserts_allowed(&self) -> bool {
             self.cached.local_mode == "none"
                 && self.phrase_prefix.is_empty()
-                && !self.cached.nine_key
-                && self.cached.key_grid.is_none()
                 && !self.cached.prediction
         }
 
@@ -807,7 +802,6 @@ mod desktop {
                         snapshot.candidate_sources[seat],
                         CLOUD | CLOUD_PENDING | AI | AI_PENDING
                     )
-                    || (seat == 0 && snapshot.wubi_unique_four_code)
             };
             let inserts = &self.plugins.inserts;
             let at = |position: usize| {

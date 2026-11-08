@@ -376,61 +376,6 @@ InputState::rerank_settled(const FocusLease &lease) {
   return owner ? owner->rerank_settled(lease) : std::nullopt;
 }
 std::optional<nlohmann::json>
-InputState::apply_cloud_response(const FocusLease &lease,
-                                 const std::string &query,
-                                 const std::string &body) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->apply_cloud_response(lease, query, body) : std::nullopt;
-}
-std::optional<nlohmann::json>
-InputState::apply_ai_candidates(const FocusLease &lease,
-                                const std::string &query,
-                                const std::string &candidates) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->apply_ai_candidates(lease, query, candidates)
-               : std::nullopt;
-}
-std::optional<nlohmann::json>
-InputState::resolve_ai_candidates(const FocusLease &lease,
-                                  const std::string &query) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->resolve_ai_candidates(lease, query) : std::nullopt;
-}
-std::optional<std::string>
-InputState::translation_query(const FocusLease &lease) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->translation_query(lease) : std::nullopt;
-}
-std::optional<std::string>
-InputState::ai_request(const FocusLease &lease, const std::string &query) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->ai_request(lease, query) : std::nullopt;
-}
-std::optional<std::pair<FocusLease, std::string>>
-InputState::current_translation_request() {
-  check_thread();
-  const auto lease = gate_.active();
-  if (!lease)
-    return std::nullopt;
-  auto query = translation_query(*lease);
-  return query ? std::optional<std::pair<FocusLease, std::string>>(
-                     std::in_place, *lease, std::move(*query))
-               : std::nullopt;
-}
-std::optional<nlohmann::json>
-InputState::apply_translations(const FocusLease &lease, uint64_t generation,
-                               const std::string &translations) {
-  check_thread();
-  auto *owner = session(lease.transport);
-  return owner ? owner->apply_translations(lease, generation, translations)
-               : std::nullopt;
-}
-std::optional<nlohmann::json>
 InputState::update_preferences(const FocusLease &lease,
                                const std::string &snapshot) {
   check_thread();

@@ -35,35 +35,6 @@ fn the_candidate_revision_moves_with_every_call_that_may_change_the_candidates()
     moved(&session, "set_dedicated_english");
 }
 
-#[test]
-fn reads_and_setters_for_later_keys_leave_the_candidate_revision_alone() {
-    let fixture = Fixture::new(QUANPIN_FIXTURE);
-    let mut session = fixture.session();
-    type_text(&mut session, "nihao");
-    let revision = session.candidate_revision();
-
-    let _ = session.snapshot();
-    let _ = session.online_query();
-    let _ = session.segment_raw_boundaries();
-    session.set_clock(Clock::default());
-    session.set_key_touch(None);
-    session.set_key_geometry(None);
-    session.set_touch_tuning(TouchTuning::default());
-    session.set_chinese_punctuation_enabled(false);
-    session.set_paired_punctuation_enabled(false);
-    session.set_punctuation_lock(1).unwrap();
-    session.set_rescoring_context("上文");
-
-    assert_eq!(session.candidate_revision(), revision);
-    // A stale online answer shows nothing, so it changes nothing either.
-    assert!(!session.apply_online_candidates(
-        &OnlineQuery::default(),
-        &["云".to_owned()],
-        CandidateSource::CloudSuggestion
-    ));
-    assert_eq!(session.candidate_revision(), revision);
-}
-
 /// The teardown the host session used to own: the queued context reaches the journal and this thread keeps no journal handle once the session is gone.
 #[test]
 fn dropping_a_session_writes_its_queue_and_releases_the_thread_journal() {

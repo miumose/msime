@@ -12,7 +12,6 @@ use msime_client_core::edition::Edition;
 use msime_client_core::host_surface::{
     offered_input_schemes, HostCapabilities, HostPlatform, SurfaceRoute,
 };
-use msime_client_providers::ai::AiSuggestionRequest;
 use msime_client_services::dictionary::access::DictionaryAccess;
 /// 按用户的设置打一串键看候选，给 `msime-mcp candidates` 用。
 pub mod candidate_preview;
@@ -29,22 +28,14 @@ use msime_client_core::punctuation::{
     route as punctuation_route, PunctuationContext, PunctuationRoute,
 };
 use msime_client_core::resources::{ResourceSet, ResourceStore, VerifiedMarker};
-use msime_client_providers::resource_packs::{self, ResourcePack};
-use msime_client_services::typing_statistics::{
-    CommitEfficiency, TypingSource, TypingStatisticsStore, RANKS,
-};
 use msime_engine::host::{
-    check_nine_key_shuangpin_table, check_shuangpin_custom_profile,
-    nine_key_shuangpin_builtin_table, nine_key_shuangpin_table_key_hints, release_gloss_caches,
-    shuangpin_builtin_table, Command, EngineOptions, Session,
+    check_shuangpin_custom_profile, release_gloss_caches, shuangpin_builtin_table, Command,
+    EngineOptions, Session,
 };
 use msime_engine::{
-    release_idle_personal_models, release_japanese_dictionary_cache,
-    resolve_eighteen_key_shuangpin, resolve_fourteen_key_shuangpin, resolve_nine_key_shuangpin,
-    validate_nine_key_shuangpin_table, validate_shuangpin_custom_profile, CandidateEdge,
-    NineKeyShuangpinError, NineKeyShuangpinKeyHint, NineKeyShuangpinKind, NineKeyShuangpinTable,
-    SchemeSet, SchemeType, ShuangpinCustomProfileError, ShuangpinCustomTable,
-    ShuangpinCustomTablePart, ShuangpinProfileKind, TextConversion,
+    release_idle_personal_models, validate_shuangpin_custom_profile, CandidateEdge, SchemeSet,
+    SchemeType, ShuangpinCustomProfileError, ShuangpinCustomTable, ShuangpinCustomTablePart,
+    ShuangpinProfileKind, TextConversion,
 };
 #[cfg(unix)]
 use msime_input_runtime::TranslationQuery;
@@ -52,10 +43,9 @@ use msime_input_runtime::TranslationQuery;
 use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
     Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, GlideKeyboard, GlidePoint,
-    GridHelpcodeOp, KeyGrid, NineKeySpellingId, OnlineCandidate, OnlineQuery, Reranker, Runtime,
-    SentenceModel, Transition, TranslationService,
+    OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
 };
-use msime_input_runtime::{EmojiPanelQuery, HandwritingQuery};
+use msime_input_runtime::EmojiPanelQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -160,10 +150,6 @@ fn host_ai_candidate_limit(stored: u8) -> u8 {
         .fixed_ai_candidate_limit()
         .unwrap_or(stored)
 }
-mod doubao_auth;
-#[cfg(not(any(target_os = "android", target_env = "ohos")))]
-mod handwriting_cells;
-pub use doubao_auth::msime_client_doubao_auth_headers;
 mod pronunciation;
 pub use dictionary::{
     dictionary_request_json, dictionary_words, edit_dictionary_word, edit_user_quick_phrase,
@@ -176,76 +162,13 @@ pub use dictionary::{
 };
 mod diagnostics;
 pub use diagnostics::{msime_client_set_diagnostic_sink, DiagnosticSink};
-mod dictionary_snapshot;
 mod dictionary_updates;
 mod key_sound;
+mod scripts;
 // 生命周期核心；`pub` 是为了让集成测试（零分配断言）直接调用纯推导函数。
 pub mod lifecycle;
 // 对共享状态目录没有写权限的宿主怎么准备运行时（iOS 键盘没有完全访问，#10945）。
 mod read_only_state;
-// 脚本插件：进程开关、每会话的实例和进程级的模块缓存、熔断。移动端是空壳。
-pub use dictionary_snapshot::{
-    inspect_snapshot_json, msime_client_snapshot_discard, msime_client_snapshot_inspect,
-    msime_client_snapshot_prepare, msime_client_snapshot_queue, msime_client_snapshot_restore,
-    msime_client_snapshot_version, snapshot_queue_json,
-};
-
-/// Run the optional offline Engine handwriting recognizer for a panel host. The caller must provide a trusted absolute model path. The shared panel uses a 420 by 420 canvas, which is also the coordinate space passed to the Engine. This path needs no provider socket, so every host can use it.
-pub fn handwriting_local_candidates(
-    model_path: &str,
-    query: &HandwritingQuery,
-) -> Result<Vec<String>, &'static str> {
-    if !std::path::Path::new(model_path).is_absolute() {
-        return Err("model path must be absolute");
-    }
-    engine_handwriting_candidates(model_path, query, 420.0, 420.0)
-}
-
-#[cfg(not(any(target_os = "android", target_env = "ohos")))]
-fn engine_handwriting_candidates(
-    model_path: &str,
-    query: &HandwritingQuery,
-    width: f32,
-    height: f32,
-) -> Result<Vec<String>, &'static str> {
-    let mut strokes = Vec::with_capacity(query.strokes.len());
-    strokes.extend(query.strokes.iter().map(|stroke| {
-        let mut points = Vec::with_capacity(stroke.len());
-        points.extend(stroke.iter().map(|point| (point.x, point.y)));
-        points
-    }));
-    let recognize = |strokes: &[Vec<(f32, f32)>]| {
-        msime_engine::handwriting_recognize(model_path, strokes, width, height)
-            .map_err(|_| "local handwriting recognizer unavailable")
-    };
-    // The Engine classifies one character per call and normalises each call's own bounding box, so a written line is split into character cells and each cell is classified on its own, as the Windows Ink recognizer segments a line into a multi-character candidate.
-    let cells = handwriting_cells::segment_handwriting_cells(&strokes);
-    if cells.len() < 2 {
-        return recognize(&strokes);
-    }
-    let mut per_cell = Vec::with_capacity(cells.len());
-    for cell in &cells {
-        let mut cell_strokes = Vec::with_capacity(cell.len());
-        cell_strokes.extend(cell.iter().map(|&index| strokes[index].clone()));
-        per_cell.push(recognize(&cell_strokes)?);
-    }
-    let combined = handwriting_cells::combine_cell_candidates(per_cell);
-    if combined.is_empty() {
-        return recognize(&strokes);
-    }
-    Ok(combined)
-}
-
-#[cfg(any(target_os = "android", target_env = "ohos"))]
-fn engine_handwriting_candidates(
-    _model_path: &str,
-    _query: &HandwritingQuery,
-    _width: f32,
-    _height: f32,
-) -> Result<Vec<String>, &'static str> {
-    // 共享桌面面板入口在移动端禁用；Android 注入 ML Kit，鸿蒙原生手写板通过 msime_client_handwriting 调用引擎的单字识别器。
-    Err("local handwriting recognizer unavailable")
-}
 
 thread_local! {
     static SESSIONS: RefCell<HashMap<u64, HostSession>> = RefCell::new(HashMap::new());
@@ -275,7 +198,6 @@ struct HostSession {
     caps_lock: bool,
     page_size_override: Option<u8>,
     /// 宿主经 `msime_client_set_key_grid` 或 `msime_client_set_nine_key_mode` 设下的组码网格，`Some(None)` 是宿主关掉了网格。只对设下它时的方案和布局有效，见 `apply_pending`。
-    key_grid_override: Option<Option<KeyGrid>>,
     /// 宿主经 `msime_client_set_private_session` 标出的隐私会话（Android 的隐私模式和不允许学习的输入框，鸿蒙和 iOS 的隐私模式）：不记选词位置和上屏效率。与用户自己关掉的「学习」无关。
     statistics_private: bool,
     /// 只用来看候选的会话（`ffi::session::SessionUse::Preview`）：在任何平台上都不记选词位置和上屏效率。
@@ -286,18 +208,8 @@ struct HostSession {
     ai_credential: Option<SessionAiCredential>,
     /// Cached copy used by every online query until preferences change.
     ai_provider_cache: Option<AiAssistantProviderConfig>,
-    /// Committing candidate selections counted but not yet written to typing statistics, indexed by one-based position minus one, with every position past a page in the last slot. See `SELECTION_BATCH`.
-    pending_selections: [u64; RANKS + 1],
-    /// 还没写进打字统计的上屏，和 `pending_selections` 一起写。只在 [`COUNTS_COMMIT_EFFICIENCY`] 时计；读音在写入时于后台线程查，不在输入线程上查。
-    pending_efficiency: Vec<EfficiencyCandidate>,
-    /// 本进程所知的打字统计开关（`TypingStatisticsStore::known_enabled`），每次交出选词时更新；`None` 是本进程还没读过统计文件，下次要计效率时再问。统计关闭时效率一项都不查。
-    statistics_enabled: Option<bool>,
-    /// Where this session's plugin packs, command tables and name list are read from.
-    plugin_roots: key_sound::PluginRoots,
     /// The key sound, melody, commit, achievement and music settings of the newest preferences, which take effect at once rather than waiting for the composition to end: none of them is Engine state.
     sound: key_sound::SessionSound,
-    /// The command-table and name-list files `options` was filled from.
-    plugin_tables: plugin_tables::PluginTables,
     /// 按需下载资源包所在的状态目录（HostOptions 的 `preferences_directory`），不是绝对路径时为空。
     state_root: Option<PathBuf>,
     /// HostOptions 记录的 `language_dictionaries` 目录：资源包里没有某个词库时退回这里的那份。
@@ -332,7 +244,7 @@ struct HostSession {
     /// 只读宿主在只读布局下（词库就是随包资源，没有谁维护）不取租约，为 `None`；其余会话都持着。
     _dictionary_access: Option<DictionaryAccess>,
     /// 资源是下载的词库代次时占用它，设置宿主回收旧版本时不会删掉会话还在读的目录；同样放在 runtime 之后，Engine 先关掉文件再放手。
-    _generation_lease: Option<msime_client_providers::dictionary_updates::GenerationLease>,
+    _generation_lease: Option<crate::dictionary_updates::GenerationLease>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -381,79 +293,13 @@ fn next_word_prediction_applies(preferences: &Preferences) -> bool {
     ffi::host::compiled_platform().shows_next_word_prediction() && preferences.next_word_prediction
 }
 
-/// 粤拼候选的输出转换：用户在粤拼下选了简体（`cantonese_simplified_output`）时交给 Engine 繁转简，转换和去重都在 Engine 里做完，视图的 `script_conversion` 对粤拼仍为 false，宿主不再转换。
-fn cantonese_output_conversion(preferences: &Preferences) -> Option<TextConversion> {
-    preferences
-        .cantonese_simplified_output
-        .then_some(TextConversion(
-            msime_client_core::chinese_conversion::cantonese_to_simplified,
-        ))
-}
-
-fn multilingual_languages_for(
-    preferences: &Preferences,
-    edition: &Edition,
-    has_japanese_model: bool,
-) -> Vec<msime_engine::multilingual::Language> {
-    // 连续多语言解码仅接在全拼；五笔混拼不等于提供全拼输入方案。
-    if !edition.offers(InputScheme::Quanpin) {
-        return Vec::new();
-    }
-    let languages = preferences
-        .multilingual_input
-        .active_languages()
-        .into_iter()
-        .filter_map(|language| match language {
-            MultilingualLanguage::Chinese => Some(msime_engine::multilingual::Language::Chinese),
-            MultilingualLanguage::English => Some(msime_engine::multilingual::Language::English),
-            MultilingualLanguage::Japanese
-                if has_japanese_model && edition.features.temporary_japanese =>
-            {
-                Some(msime_engine::multilingual::Language::Japanese)
-            }
-            MultilingualLanguage::Japanese => None,
-        })
-        .collect::<Vec<_>>();
-    if languages.len() >= 2 {
-        languages
-    } else {
-        Vec::new()
-    }
-}
-
-fn japanese_model_available(options: &EngineOptions) -> bool {
-    if options.japanese_dictionary.is_empty() {
-        Path::new(&options.resources)
-            .join("msime-japanese.dat")
-            .is_file()
-    } else {
-        Path::new(&options.japanese_dictionary).is_file()
-    }
-}
-
 fn apply_local_mode_resource_gates(options: &mut EngineOptions, edition: &Edition) {
     let resources = std::path::Path::new(&options.resources);
     let has_emoji_catalog = resources.join("msime-others.db").is_file();
     let has_english_dictionary = resources.join("msime-english.db").is_file();
-    // 下载的日文词典写在 `japanese_dictionary` 里；为空时 Engine 读资源目录里的那份。
-    let has_japanese_model = if options.japanese_dictionary.is_empty() {
-        resources.join("msime-japanese.dat").is_file()
-    } else {
-        Path::new(&options.japanese_dictionary).is_file()
-    };
     options.local_emoji &= has_emoji_catalog;
     options.local_kaomoji &= has_emoji_catalog;
     options.local_temporary_english &= has_english_dictionary;
-    options.local_temporary_japanese &= has_japanese_model && edition.features.temporary_japanese;
-    // 日文混输和临时日文读同一份模型、同一个日文 provider（会话方案集里有 `JapaneseRomaji` 才建），门槛也一样；模型不在时只剩假名，不算转换。
-    options.mixed_japanese &= has_japanese_model && edition.features.temporary_japanese;
-    options.multilingual_languages.retain(|language| {
-        *language != msime_engine::multilingual::Language::Japanese
-            || (has_japanese_model && edition.features.temporary_japanese)
-    });
-    if options.multilingual_languages.len() < 2 {
-        options.multilingual_languages.clear();
-    }
     // 引擎里的键盘模型读的是同一份随版本资源锁走的模型；宿主不打开它（见 `engine_sentence_association`），不带模型的版本更不交给 Engine。
     options.sentence_association.neural_keyboard &= edition.features.neural_keyboard;
 }
@@ -477,41 +323,16 @@ fn punctuation_lock_code(lock: msime_client_core::preferences::PunctuationLock) 
 /// The Engine's sentence association switches. Neither model switch reaches it: the desktop one gates the runtime's settled reranker (`Runtime::set_settled_rerank_enabled`), the only place that model runs, and the keyboard one (整句联想「增强」) mounts the runtime's per-keystroke reranker (`keyboard_reranker_enabled`), so the Engine's own keyboard-model rerank stays off.
 fn engine_sentence_association(
     preferences: &msime_client_core::preferences::SentenceAssociationPreferences,
-    state_root: Option<&std::path::Path>,
+    _state_root: Option<&std::path::Path>,
 ) -> msime_engine::SentenceAssociationOptions {
-    // 选中的语法模型装好后才有文件路径；选中但没装（或包装在别处的 state_root
-    // 下没发布）时留空，引擎逐字节退回无模型基线。
-    let pack = match preferences.grammar_model {
-        msime_client_core::preferences::GrammarModel::None => None,
-        msime_client_core::preferences::GrammarModel::Wanxiang => {
-            Some(ResourcePack::GrammarWanxiang)
-        }
-        msime_client_core::preferences::GrammarModel::BaguwenWord => {
-            Some(ResourcePack::GrammarBaguwen)
-        }
-        msime_client_core::preferences::GrammarModel::BaguwenCompact => {
-            Some(ResourcePack::GrammarBaguwenCompact)
-        }
-        msime_client_core::preferences::GrammarModel::Baishuang => {
-            Some(ResourcePack::GrammarBaishuang)
-        }
-    };
-    let collocation_model = state_root
-        .zip(pack)
-        .and_then(|(root, pack)| {
-            pack.set()
-                .artifacts
-                .first()
-                .and_then(|artifact| resource_packs::installed_file(root, pack, &artifact.name))
-        })
-        .unwrap_or_default();
+    // 语法模型按资源包下载的机制已移除；没有随包的搭配模型，引擎逐字节退回无模型基线。
     msime_engine::SentenceAssociationOptions {
         word_lattice: preferences.word_lattice,
         // 引擎自己那层键盘模型（九键跨切分重排、全拼和双拼词库内重排）不跟「增强」打开：在 runtime 的逐键重排之外它几乎不加分，却让按键延迟和内存再涨一截，取舍见 .agents/notes/implemented/feature/2026-10-29-enhanced-runtime-reranker-only.md。它留给直接构造 `EngineOptions` 的评测和实验（`convert_eval`）。
         neural_keyboard: false,
         show_next_on_duplicate: preferences.show_next_on_duplicate,
-        collocation_model,
-        collocation_rerank: pack.is_some(),
+        collocation_model: PathBuf::new(),
+        collocation_rerank: false,
         // 搭配调参系数逐字段透传；偏好层已把非法值回退到出厂值。
         collocation_weight: preferences.sentence_collocation_weight,
         collocation_grammar: msime_engine::octagram::GramConfig {
@@ -681,116 +502,9 @@ impl HostSession {
                 snapshot.preferences.cloud_candidates
             })
     }
-    /// Android、鸿蒙与 iOS 会话是否不记统计：只看宿主经 `msime_client_set_private_session` 标出的隐私会话。用户在设置里关掉学习不算，统计开着就照常计数。只在 [`PRIVATE_SESSIONS_SKIP_STATISTICS`] 时成立，其他宿主照旧计数。只看候选的会话（`preview`）和宿主声明由别的会话记统计的会话（`statistics_recorded_elsewhere`）在任何平台上都不计。
+    /// 只看候选的会话、宿主声明由别的会话记统计的会话，以及隐私会话不做预测。
     fn private_session(&self) -> bool {
-        self.preview
-            || self.statistics_recorded_elsewhere
-            || (PRIVATE_SESSIONS_SKIP_STATISTICS && self.statistics_private)
-    }
-
-    /// Count a committing selection in memory, and hand the batch to the store once it is `SELECTION_BATCH` long.
-    fn count_selection(&mut self, position: usize) {
-        // Android 的隐私模式与不学习输入框、鸿蒙和 iOS 的隐私模式不统计选词位置。
-        if self.private_session() {
-            return;
-        }
-        // Positions are one-based; zero is not a position, and the store has always refused it.
-        let Some(slot) = position.checked_sub(1) else {
-            return;
-        };
-        let slot = &mut self.pending_selections[slot.min(RANKS)];
-        *slot = slot.saturating_add(1);
-        if self.pending_selections.iter().sum::<u64>() >= SELECTION_BATCH {
-            self.flush_selections();
-        }
-    }
-
-    /// 选中的候选在派发前的样子，供上屏后计效率：不记统计的会话、统计关闭、非 Android 宿主或找不到这个候选时为 `None`。
-    fn efficiency_candidate(&mut self, action: &Action) -> Option<EfficiencyCandidate> {
-        if !COUNTS_COMMIT_EFFICIENCY || self.private_session() {
-            return None;
-        }
-        let id = match action {
-            Action::Select(id) | Action::SelectAnyCandidate(id) => *id,
-            _ => return None,
-        };
-        if !self.statistics_enabled()? {
-            return None;
-        }
-        let view = self.runtime.view();
-        let candidate = view
-            .candidates
-            .into_iter()
-            .find(|candidate| candidate.id == id)?;
-        Some(EfficiencyCandidate {
-            prediction: candidate.code.is_empty() && view.preedit.is_empty(),
-            sentence: msime_engine::CandidateSource::from_u8(candidate.source)
-                .is_some_and(msime_engine::CandidateSource::is_sentence_learning),
-            typed_keys: candidate
-                .code
-                .chars()
-                .filter(char::is_ascii_alphanumeric)
-                .count() as u64,
-            text: candidate.text,
-        })
-    }
-
-    /// 打字统计目录，即 HostOptions 的 `preferences_directory`（`state_root`）：各宿主记字数和按键、统计页和上传读的都是这里的 `typing-statistics.json`，选词位置和上屏效率要写进同一份。`user_data` 是 Engine 的个人词库目录，没有宿主在那里读写统计。不是绝对路径时为 `None`，这时什么都不记。
-    fn statistics_directory(&self) -> Option<&Path> {
-        self.state_root.as_deref()
-    }
-
-    /// 统计开关，只看本进程所知的（上次读写统计文件时看到的），不在输入线程上读文件：这里在每次选词的路上，读一次就要取文件锁、先把本进程攒着的整批写出去再 fsync。本进程还没读过统计文件时当作打开，效率照攒，写入时统计文件自己的开关作数，关着就整批丢掉。没有统计目录时当作关闭。
-    fn statistics_enabled(&mut self) -> Option<bool> {
-        if let Some(enabled) = self.statistics_enabled {
-            return Some(enabled);
-        }
-        let enabled = match self.statistics_directory() {
-            Some(directory) => TypingStatisticsStore::new(directory).known_enabled(),
-            None => Some(false),
-        };
-        self.statistics_enabled = enabled;
-        Some(enabled.unwrap_or(true))
-    }
-
-    /// 记下一次上屏，等下一次写统计时一起算。上限 [`EFFICIENCY_BATCH_LIMIT`]，超出的不计。
-    fn count_efficiency(&mut self, candidate: EfficiencyCandidate) {
-        if self.pending_efficiency.len() < EFFICIENCY_BATCH_LIMIT {
-            self.pending_efficiency.push(candidate);
-        }
-    }
-
-    /// Hand the selections counted since the last flush to the process's pending typing-statistics batch for the statistics directory.
-    ///
-    /// 只加内存里的计数，不取统计文件锁、不碰磁盘（`TypingStatisticsStore::queue_selections`）：这里在宿主的输入线程上跑（满一批、失焦和销毁会话时），macOS 的 IMK 主线程、Linux 的 GLib 主循环和移动宿主的 UI 线程都不能整份读写统计文件再 fsync，也不能等统计工作线程手里那次写。攒着的选词和宿主经 `record` 攒的上屏一起写出：失焦和销毁随后的 `flush_typing_statistics`（Windows 失焦和桌面销毁在当前线程上，其余在后台线程上）、满间隔的 `record`，以及读统计的任何操作。尽力而为：统计不能成为按键失败的原因，store 拒收的批次丢掉，不报出去。统计开关由 store 在写出时自己看，这里不另查，免得两处不一致。
-    fn flush_selections(&mut self) {
-        let pending = std::mem::take(&mut self.pending_selections);
-        let Some(directory) = self.statistics_directory().map(Path::to_path_buf) else {
-            return;
-        };
-        let mut batch = Vec::with_capacity(RANKS);
-        batch.extend(
-            pending
-                .iter()
-                .enumerate()
-                .filter(|(_, count)| **count > 0)
-                .map(|(slot, count)| (slot + 1, *count)),
-        );
-        let enabled = TypingStatisticsStore::new(&directory)
-            .queue_selections(&batch)
-            .ok()
-            .flatten();
-        let commits = std::mem::take(&mut self.pending_efficiency);
-        if !commits.is_empty() {
-            // 查读音要打开词库，放到后台线程，不占输入线程；测试里同步写，好断言结果。
-            if cfg!(test) {
-                record_efficiency(&self.options, &directory, &commits);
-            } else {
-                record_efficiency_in_background(self.options.clone(), directory, commits);
-            }
-        }
-        // 用户可能在设置里关掉或打开了统计：换成本进程此刻所知的开关，它随每次写统计更新。不在输入线程上为一个开关读文件。
-        self.statistics_enabled = enabled;
+        self.preview || self.statistics_recorded_elsewhere || self.statistics_private
     }
 
     /// Rebuild the Engine for the requested preferences once the composition is idle. The `Ok` value is why the preferred scheme was not the one applied, when it was not.
@@ -847,18 +561,12 @@ impl HostSession {
             self.edition.default_scheme,
         );
         options.scheme = scheme_code(scheme);
-        options.vietnamese_input_method = vietnamese_input_method_code(preferences.vietnamese);
-        options.vietnamese_tone_style = vietnamese_tone_style_code(preferences.vietnamese);
-        options.korean_layout =
-            korean_layout_code(preferences.korean, self.korean_romaja_requested);
         let profile_fallback = apply_shuangpin_profile(&mut options, &preferences);
         // 自定义双拼表不能用的原因只在真的跑双拼时才值得报告。
         let fallback =
             scheme_fallback.or(profile_fallback.filter(|_| scheme == InputScheme::Shuangpin));
         options.shuangpin_preedit_uses_raw = preferences.shuangpin_preedit_uses_raw;
         options.shuangpin_preedit_separated = preferences.shuangpin_preedit_separated;
-        options.force_cantonese_shuangpin = force_cantonese_shuangpin(scheme, &preferences);
-        options.cantonese_output_conversion = cantonese_output_conversion(&preferences);
         options.single_character_only = preferences.single_character_only;
         options.caret_edit_suffix = caret_edit_suffix_applies(&preferences);
         options.learning = preferences.learning && !self.read_only_state;
@@ -868,11 +576,6 @@ impl HostSession {
         options.autocorrect_transposition = preferences.quanpin.autocorrect_transposition;
         options.autocorrect_neighbor = preferences.quanpin.autocorrect_neighbor;
         options.fuzzy_pinyin_rules = preferences.fuzzy_pinyin.active_rules();
-        options.wubi_mixed_pinyin = preferences.wubi_mixed_pinyin;
-        options.wubi_z_wildcard = preferences.wubi_z_wildcard;
-        options.wubi_profile = wubi_profile_code(preferences.wubi_profile);
-        // 「候选显示剩余编码」关掉时，引擎也不再给五笔候选附完整码，宿主退回显示注释时就看不到编码（#10790）。
-        options.wubi_reverse_code = preferences.wubi_code_hint;
         options.frequency_mode = preferences.frequency.mode.as_str().into();
         options.frequency_trigger_count = preferences.frequency.trigger_count;
         options.frequency_linear_step = preferences.frequency.linear_step;
@@ -884,12 +587,6 @@ impl HostSession {
         options.mixed_emoji = preferences.mixed_input.emoji;
         options.mixed_kaomoji = preferences.mixed_input.kaomoji;
         options.mixed_symbols = preferences.mixed_input.symbols;
-        options.mixed_japanese = preferences.mixed_input.japanese;
-        options.multilingual_languages = multilingual_languages_for(
-            &preferences,
-            self.edition,
-            japanese_model_available(&options),
-        );
         options.quick_phrase_candidates =
             self.quick_phrase_candidates_requested && preferences.mixed_input.quick_phrase;
         options.quick_phrase_frequency = preferences.mixed_input.quick_phrase_frequency;
@@ -916,19 +613,10 @@ impl HostSession {
         let helpcode = helpcode_for_scheme(&preferences, scheme);
         options.helpcode = helpcode.enabled;
         options.strict_quanpin_helpcode = helpcode.strict_filter;
-        options.grid_helpcode = helpcode.grid;
         options.show_helpcode = helpcode.show_in_candidate_window;
         options.helpcode_schema = helpcode.schema.as_str().into();
         options.helpcode_trigger_key = helpcode.trigger_key.bytes().next();
         options.shuangpin_helpcode_modes = shuangpin_helpcode_modes(helpcode.modes);
-        let plugin_root = self.plugin_roots.installed.as_deref();
-        let plugin_tables = plugin_tables::PluginTables::stamp(
-            plugin_root,
-            self.plugin_roots.builtin_packs.as_deref(),
-            &options,
-            &preferences.plugins,
-        );
-        plugin_tables.fill(&self.plugin_tables, plugin_root, &mut options);
         options.sentence_association = engine_sentence_association(
             &preferences.sentence_association,
             self.state_root.as_deref(),
@@ -977,42 +665,6 @@ impl HostSession {
                 .set_punctuation_lock(lock)
                 .map_err(|e| e.to_string())?;
         }
-        // 双拼换表也算换布局：宿主设下的组码网格带着旧表，不能继续沿用。
-        let layout_changed = preferences.touch_keyboard_layout
-            != self.applied.touch_keyboard_layout
-            || preferences.touch_shuangpin_layout != self.applied.touch_shuangpin_layout
-            || preferences.touch_wubi_layout != self.applied.touch_wubi_layout
-            || preferences.shuangpin_profile != self.applied.shuangpin_profile
-            || preferences.shuangpin_custom_profile != self.applied.shuangpin_custom_profile
-            || preferences.nine_key_shuangpin_profile != self.applied.nine_key_shuangpin_profile
-            || preferences.nine_key_shuangpin_custom_profile
-                != self.applied.nine_key_shuangpin_custom_profile;
-        let scheme = SchemeType::from_u8(options.scheme);
-        // 全拼、注音支持九键，双拼还支持派生的 14 键，五笔支持 14 键；具体组合由 `Runtime::set_key_grid` 校验。
-        let grid_scheme = scheme.is_some_and(|value| {
-            value.nine_key() || matches!(value, SchemeType::Shuangpin | SchemeType::Wubi)
-        });
-        // 宿主的网格覆盖只对它设下时的那个方案有效：全拼九宫格的开关带进注音，会让没选「注音 9 键」的注音也离开大千键位。
-        let scheme_changed = options.scheme != self.options.scheme;
-        let next_key_grid_override = if grid_scheme && !layout_changed && !scheme_changed {
-            self.key_grid_override
-        } else {
-            None
-        };
-        let key_grid = if grid_scheme {
-            next_key_grid_override.unwrap_or_else(|| layout_key_grid(scheme, &preferences))
-        } else {
-            None
-        };
-        if key_grid.is_some() {
-            engine.set_key_grid(key_grid).map_err(|e| e.to_string())?;
-        }
-        // 正在用九键双拼而自定义表不能用时报告一次原因，与 26 键自定义双拼按小鹤运行时相同。
-        let fallback = fallback.or_else(|| {
-            matches!(key_grid, Some(KeyGrid::NineKeyShuangpin(_)))
-                .then(|| nine_key_shuangpin_grid(&preferences).1)
-                .flatten()
-        });
         engine
             .set_dedicated_english(self.english_mode)
             .map_err(|e| e.to_string())?;
@@ -1021,7 +673,7 @@ impl HostSession {
             .set_mention_places(preferences.local_modes.mention_places)
             .map_err(|e| e.to_string())?;
         self.runtime
-            .replace_engine_with_touch_layout(engine, page_size, preferences.touch_keyboard_layout)
+            .replace_engine(engine, page_size)
             .map_err(|e| e.to_string())?;
         let desktop_turned_on = preferences.sentence_association.neural_desktop
             && !self.applied.sentence_association.neural_desktop;
@@ -1040,7 +692,7 @@ impl HostSession {
                     &options.resources,
                     options.helpcode_fallback_resources.as_deref(),
                     self.recorded_rerank_models.as_deref(),
-                    self.plugin_roots.builtin_sounds.as_deref(),
+                    None,
                     self.state_root.as_deref(),
                     self.recorded_sentence_model.as_deref(),
                     self.pause_rerank,
@@ -1052,7 +704,7 @@ impl HostSession {
                     &options.resources,
                     options.helpcode_fallback_resources.as_deref(),
                     self.recorded_rerank_models.as_deref(),
-                    self.plugin_roots.builtin_sounds.as_deref(),
+                    None,
                     self.state_root.as_deref(),
                     self.recorded_sentence_model.as_deref(),
                 ));
@@ -1061,16 +713,14 @@ impl HostSession {
                 &options.resources,
                 options.helpcode_fallback_resources.as_deref(),
                 self.recorded_rerank_models.as_deref(),
-                self.plugin_roots.builtin_sounds.as_deref(),
+                None,
                 self.state_root.as_deref(),
             );
         }
         self.options = options;
-        self.plugin_tables = plugin_tables;
         self.applied = preferences;
         self.preferences_pending = false;
         self.resources_pending = false;
-        self.key_grid_override = next_key_grid_override;
         // 会话建立时用的是运行时选项里嵌的偏好快照，开关可能要等宿主随后送来的偏好才打开（#10341 里报告者的 `runtime-options.json` 就写着关），所以打开的这一刻再报告一次模型接上没有。新模型还在后台加载时不报告，加载完换上时会报告。
         if desktop_turned_on && self.settled_model_loading.is_none() {
             self.report_settled_model();
@@ -1089,127 +739,6 @@ impl HostSession {
             self.settled_model.as_deref(),
             self.settled_model_attached,
         );
-    }
-
-    /// 输入框获得焦点时，让 `/` 指令表、K 模式短语表、辅助码表、`@` 名单和脚本插件的 `/` 指令跟上插件目录：设置页可能刚导入了表、改了名单或改了授权。没有文件变动时什么都不读。换表失败只报告，不让聚焦失败。
-    fn refresh_plugin_tables(&mut self) {
-        let root = self.plugin_roots.installed.as_deref();
-        let tables = plugin_tables::PluginTables::stamp(
-            root,
-            self.plugin_roots.builtin_packs.as_deref(),
-            &self.options,
-            &self.applied.plugins,
-        );
-        // 指令表、`@` 名单和短语表换不上也不算聚焦失败。这三个 setter 都是先把表交给 Engine，再刷新打开着的那个模式的列表；除了代次耗尽（那时随后的 `runtime.focus` 同样失败），报错只来自这次刷新，典型是 K 模式开着而数据库短语查不了。此时 Engine 已经用上新表，所以照样记进 `options`（重建的 Engine 从这里开始），戳也照常更新；把错误往上抛会让这次和之后每一次聚焦都失败（戳没更新，下次又会重试）。
-        if tables.commands_differ(&self.plugin_tables) {
-            let table = tables.command_table(root);
-            if let Err(error) = self.runtime.set_command_table(&table) {
-                diagnostics::report("command table view not refreshed", &error.to_string());
-            }
-            self.options.command_table = table;
-        }
-        if tables.mentions_differ(&self.plugin_tables) {
-            let entries = tables.mention_entries(root, &self.options);
-            if let Err(error) = self.runtime.set_mention_entries(&entries) {
-                diagnostics::report("mention list view not refreshed", &error.to_string());
-            }
-            self.options.mention_entries = entries;
-        }
-        if tables.phrases_differ(&self.plugin_tables) {
-            let table = tables.quick_phrase_table(root);
-            if let Err(error) = self.runtime.set_quick_phrase_table(&table) {
-                diagnostics::report("quick phrase view not refreshed", &error.to_string());
-            }
-            self.options.quick_phrase_table = table;
-        }
-        if tables.helpcode_differs(&self.plugin_tables) {
-            let table = tables.helpcode_table(root, &self.options);
-            // 辅助码表换不上不算聚焦失败：报错会让这次和之后每一次聚焦都失败（戳没更新，下次又会重试）。记下来，保留当前的表，照常更新戳。
-            match self.runtime.set_helpcode_table(table.clone()) {
-                Ok(()) => self.options.helpcode_table = table,
-                Err(error) => {
-                    diagnostics::report("helpcode table not replaced", &error.to_string())
-                }
-            }
-        }
-        self.plugin_tables = tables;
-        // 脚本插件的 `/` 指令跟着授权文件走，它有自己的戳（`ScriptSet` 按戳重读授权），不进上面的表戳。
-        self.refresh_plugin_commands();
-    }
-
-    /// 输入框获得焦点时，看设置应用是否在会话打开后装好（或移除）了日文、粤拼、注音、笔画、五笔的资源包和落定重排模型：只做几次 stat。词典路径有变就记下，等输入空闲时由 `apply_pending` 重建 Engine（重建时日文临时模式的开关按新路径重新判断）；落定重排模型的文件有变就起一个后台线程加载它（经 `sentence_model_settled` 的共享缓存），加载完之后由某次输入空闲的 `apply_pending` 换上。聚焦本身不读词典也不读模型文件。
-    ///
-    /// 资源包目录只在校验完、整体原子发布之后才出现，所以这里看到的文件都是完整的。
-    fn refresh_resource_packs(&mut self) {
-        let state_root = self.state_root.as_deref();
-        let settled_model = settled_model_file(
-            &self.options.resources,
-            self.recorded_settled_model.as_deref(),
-            state_root,
-        );
-        if settled_model != self.settled_model {
-            self.settled_model = settled_model;
-            self.settled_model_loading = Some(load_settled_model(
-                &self.options.resources,
-                self.settled_model.clone(),
-            ));
-        }
-        // 「增强」开着时，设置应用可能刚装好（或移除了）逐键重排模型的资源包（Android 的 `rerank-model-small`）：来源变了就重新挂，随包的句子模型换成 ONNX 模型，或反过来。
-        if self.keyboard_reranker_allowed
-            && keyboard_reranker_enabled(&self.applied.sentence_association, self.edition)
-        {
-            let source = ffi::onnx_rerank_source(
-                &self.options.resources,
-                self.options.helpcode_fallback_resources.as_deref(),
-                self.recorded_rerank_models.as_deref(),
-                self.plugin_roots.builtin_sounds.as_deref(),
-                state_root,
-            );
-            if source != self.keyboard_reranker_source {
-                // 新模型挂好之前沿用旧的，见 `keyboard_reranker_loading`。
-                self.keyboard_reranker_loading = Some(load_keyboard_reranker(
-                    &self.options.resources,
-                    self.options.helpcode_fallback_resources.as_deref(),
-                    self.recorded_rerank_models.as_deref(),
-                    self.plugin_roots.builtin_sounds.as_deref(),
-                    state_root,
-                    self.recorded_sentence_model.as_deref(),
-                    self.pause_rerank,
-                ));
-                self.keyboard_reranker_source = source;
-            }
-        }
-        let downloaded = state_root.map(DownloadedDictionaries::new);
-        let dictionaries = LanguageDictionaries::resolve(
-            downloaded.as_ref(),
-            self.recorded_language_dictionaries.as_deref(),
-        );
-        let cantonese = path_text(dictionaries.cantonese);
-        let zhuyin = path_text(dictionaries.zhuyin);
-        let stroke = path_text(dictionaries.stroke);
-        let japanese = path_text(japanese_dictionary(downloaded.as_ref()));
-        let wubi = path_text(wubi_dictionary(
-            downloaded.as_ref(),
-            Path::new(&self.options.resources),
-        ));
-        let grammar_model =
-            engine_sentence_association(&self.applied.sentence_association, state_root)
-                .collocation_model;
-        if cantonese == self.options.cantonese_dictionary
-            && zhuyin == self.options.zhuyin_dictionary
-            && stroke == self.options.stroke_dictionary
-            && japanese == self.options.japanese_dictionary
-            && wubi == self.options.wubi_dictionary
-            && grammar_model == self.options.sentence_association.collocation_model
-        {
-            return;
-        }
-        self.options.cantonese_dictionary = cantonese;
-        self.options.zhuyin_dictionary = zhuyin;
-        self.options.stroke_dictionary = stroke;
-        self.options.japanese_dictionary = japanese;
-        self.options.wubi_dictionary = wubi;
-        self.resources_pending = true;
     }
 
     /// 「中英文之间加空格」开关，跟着最新请求的偏好走：它只是上屏后处理，不是 Engine 状态，不必等组字结束后重建。
@@ -1361,20 +890,6 @@ impl HostSession {
             .requested
             .as_ref()
             .map_or(&self.applied, |previous| &previous.preferences);
-        let translation_changed =
-            translation_query_preferences_changed(previous_preferences, &snapshot.preferences);
-        if previous_preferences.local_translation.enabled
-            && !snapshot.preferences.local_translation.enabled
-        {
-            // 安全：空指针/零长度是该入口定义的取消全部并卸载操作，不读取内存。
-            unsafe { msime_client_local_translation_cancel(std::ptr::null(), 0) };
-        }
-        if translation_changed && !self.runtime.is_idle() {
-            // 释义配置与服务凭据变化时清掉旧释义，使旧代次的回包不能进入新配置。
-            self.runtime
-                .invalidate_translations()
-                .map_err(|e| e.to_string())?;
-        }
         if ai_changed && !self.runtime.is_idle() {
             // AI 配置或令牌变化时先清理旧候选并使旧查询失效，再发布新偏好。
             self.runtime
@@ -1390,11 +905,6 @@ impl HostSession {
             .expect("requested snapshot exists")
             .preferences
             .clone();
-        // 繁简只投影混合候选的中文段，不改组字，和宿主的即时输出开关同步。
-        self.runtime.set_multilingual_output(
-            requested_preferences.traditional_chinese_output,
-            requested_preferences.traditional_chinese_variant,
-        );
         self.set_ai_provider_cache(&requested_preferences);
         self.runtime
             .set_english_online_candidates_enabled(requested_preferences.english_online_candidates)
@@ -1402,11 +912,6 @@ impl HostSession {
         self.runtime
             .set_cloud_candidates_enabled(requested_preferences.cloud_candidates)
             .map_err(|e| e.to_string())?;
-        // 候选词翻译的范围只改查询和画法，跟着最新请求的偏好走；换范围时的旧释义已经在上面随释义偏好的变化清掉。
-        self.runtime
-            .set_translation_scope_highlighted(translation_scope_highlighted(
-                &requested_preferences,
-            ));
         // 宿主状态，不是 Engine 状态：跟着最新请求的偏好走，不必等这次偏好重建 Engine，也不必等组字结束。
         self.runtime
             .set_backspace_reverts_selection(requested_preferences.backspace_reverts_selection);
@@ -1433,10 +938,8 @@ impl HostSession {
         // 「二三候选」键也是宿主编排状态：跟着最新请求的偏好走，下一键生效。
         self.runtime
             .set_second_third_candidate(requested_preferences.second_third_candidate);
-        self.sound.update(key_sound::SoundSettings::new(
-            &requested_preferences.plugins,
-            &self.plugin_roots,
-        ));
+        self.sound
+            .update(key_sound::SoundSettings::new(&requested_preferences.plugins));
         self.requested_settled = true;
         let fallback = self.apply_pending()?;
         Ok(self.preferences_response(fallback))
@@ -1445,12 +948,6 @@ impl HostSession {
     /// `update` 收到与上一份逐字相同的快照：只做可能因别处改动而需要重做的事，回复与完整更新相同。
     fn update_unchanged(&mut self) -> Result<Value, String> {
         let snapshot = self.requested.as_ref().expect("requested snapshot exists");
-        // 宿主经 `msime_client_set_multilingual_output` 临时切过繁简时，再交一次偏好照旧把输出交还给偏好；Windows 宿主在每次更新偏好后也按偏好重置自己的繁简状态，两边要一致。
-        let (traditional, variant) = (
-            snapshot.preferences.traditional_chinese_output,
-            snapshot.preferences.traditional_chinese_variant,
-        );
-        self.runtime.set_multilingual_output(traditional, variant);
         // 设置页可能重新导入或删掉了正在用的音效包、效果包：只给清单盖戳，戳变了才重读效果包，和完整更新里新建的设置结果相同。
         self.sound.restamp();
         // 组字结束后待应用的偏好、资源包和落定重排模型仍在这里换上。
@@ -1465,14 +962,6 @@ impl HostSession {
         // Applied at once, so no transition will carry the reason the preferred scheme was replaced; a deferred change reports it from `complete_transition` instead.
         if let Some(fallback) = fallback {
             response["diagnostic"] = fallback.into();
-        }
-        // 偏好里的方案缺词库时报出要补的资源包，宿主可以自己下载（macOS 输入法），不必等用户打开设置。按会话此刻的词典路径算，资源包装好、聚焦刷新之后就不再带它。
-        if let Some(pack) = missing_scheme_pack(
-            snapshot.preferences.scheme,
-            &offered_input_schemes(self.edition),
-            &LanguageDictionaries::of_options(&self.options),
-        ) {
-            response["missing_resource_pack"] = pack.id().into();
         }
         response
     }
@@ -1650,219 +1139,13 @@ fn apply_shuangpin_profile(
     }
 }
 
-/// 按与实体双拼相同的方案和非法表回退派生触屏 14 键。
-fn fourteen_key_shuangpin_grid(preferences: &Preferences) -> KeyGrid {
-    let kind = ShuangpinProfileKind::from_u8(profile_code(preferences.shuangpin_profile))
-        .expect("偏好双拼方案均有对应的引擎方案");
-    let custom = (preferences.shuangpin_profile == ShuangpinProfile::Custom)
-        .then(|| engine_shuangpin_custom_table(&preferences.shuangpin_custom_profile));
-    let table = resolve_fourteen_key_shuangpin(kind, custom.as_ref()).unwrap_or_else(|_| {
-        resolve_fourteen_key_shuangpin(ShuangpinProfileKind::Xiaohe, None)
-            .expect("内置小鹤方案可派生 14 键表")
-    });
-    KeyGrid::FourteenKeyShuangpin(table)
-}
 
-/// 按与实体双拼相同的方案和非法表回退派生触屏 18 键。
-fn eighteen_key_shuangpin_grid(preferences: &Preferences) -> KeyGrid {
-    let kind = ShuangpinProfileKind::from_u8(profile_code(preferences.shuangpin_profile))
-        .expect("偏好双拼方案均有对应的引擎方案");
-    let custom = (preferences.shuangpin_profile == ShuangpinProfile::Custom)
-        .then(|| engine_shuangpin_custom_table(&preferences.shuangpin_custom_profile));
-    let table = resolve_eighteen_key_shuangpin(kind, custom.as_ref()).unwrap_or_else(|_| {
-        resolve_eighteen_key_shuangpin(ShuangpinProfileKind::Xiaohe, None)
-            .expect("内置小鹤方案可派生 18 键表")
-    });
-    KeyGrid::EighteenKeyShuangpin(table)
-}
-
-/// 偏好里的九键双拼方案对应的 Engine 方案。
-pub fn nine_key_shuangpin_kind(profile: NineKeyShuangpinProfile) -> NineKeyShuangpinKind {
-    match profile {
-        NineKeyShuangpinProfile::Migala2 => NineKeyShuangpinKind::Migala2,
-        NineKeyShuangpinProfile::Migala3 => NineKeyShuangpinKind::Migala3,
-        NineKeyShuangpinProfile::Gushi2Low => NineKeyShuangpinKind::Gushi2Low,
-        NineKeyShuangpinProfile::Custom => NineKeyShuangpinKind::Custom,
-    }
-}
-
-/// 偏好里的九键双拼表（与 26 键的自定义表同形）换成 Engine 的表。
-fn engine_nine_key_shuangpin_table(profile: &ShuangpinCustomProfile) -> NineKeyShuangpinTable {
-    let pairs = |part: &std::collections::BTreeMap<String, String>| {
-        part.iter()
-            .map(|(unit, key)| (unit.clone(), key.clone()))
-            .collect()
-    };
-    NineKeyShuangpinTable {
-        initials: pairs(&profile.initials),
-        finals: pairs(&profile.finals),
-        zero_initials: pairs(&profile.zero_initials),
-    }
-}
-
-/// 偏好里的九键双拼自定义表能不能用，由 Engine 判定；不能用时是给日志和代理看的英文原因。MCP 等写偏好的一方保存之前用它校验。
-pub fn validate_nine_key_shuangpin_custom_profile(
-    profile: &ShuangpinCustomProfile,
-) -> Result<(), String> {
-    validate_nine_key_shuangpin_table(&engine_nine_key_shuangpin_table(profile))
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-impl From<NineKeyShuangpinError> for ShuangpinCustomProblem {
-    fn from(error: NineKeyShuangpinError) -> Self {
-        use ShuangpinCustomProblemKind as Kind;
-        match error {
-            NineKeyShuangpinError::UnknownUnit { part, unit } => Self {
-                part: Some(part.name()),
-                unit: Some(unit),
-                ..Self::of_kind(Kind::UnknownUnit)
-            },
-            NineKeyShuangpinError::DuplicateUnit { part, unit } => Self {
-                part: Some(part.name()),
-                unit: Some(unit),
-                ..Self::of_kind(Kind::DuplicateUnit)
-            },
-            NineKeyShuangpinError::MissingUnit { part, unit } => Self {
-                part: Some(part.name()),
-                unit: Some(unit.to_owned()),
-                ..Self::of_kind(Kind::MissingUnit)
-            },
-            NineKeyShuangpinError::InvalidKey { part, unit, key } => Self {
-                part: Some(part.name()),
-                unit: Some(unit),
-                key: Some(key),
-                ..Self::of_kind(Kind::InvalidKey)
-            },
-        }
-    }
-}
-
-/// 编辑中的九键双拼表有什么问题，能用时是 `None`。问题与 26 键自定义表同一个形状（只会出现 `unknown_unit`、`duplicate_unit`、`missing_unit` 和 `invalid_key` 四种），给设置页标出出错的那一格；用 Engine 不留存的检查，每改一个键问一次也不泄漏。
-pub fn nine_key_shuangpin_custom_profile_problem(
-    profile: &ShuangpinCustomProfile,
-) -> Option<ShuangpinCustomProblem> {
-    check_nine_key_shuangpin_table(&engine_nine_key_shuangpin_table(profile))
-        .err()
-        .map(ShuangpinCustomProblem::from)
-}
-
-/// 内置九键双拼方案写成自定义表的样子，作为编辑的起点；`Custom` 没有内置的表，返回 `None`。
-pub fn builtin_nine_key_shuangpin_custom_profile(
-    profile: NineKeyShuangpinProfile,
-) -> Option<ShuangpinCustomProfile> {
-    let table = nine_key_shuangpin_builtin_table(nine_key_shuangpin_kind(profile))?;
-    let map = |pairs: Vec<(String, String)>| pairs.into_iter().collect();
-    Some(ShuangpinCustomProfile {
-        initials: map(table.initials),
-        finals: map(table.finals),
-        zero_initials: map(table.zero_initials),
-    })
-}
-
-/// 九键双拼的一个数字键在键面上写什么：这个键上的声母、韵母（`ü` 开头的韵母写成 `ü`），以及零声母编码是否从这个键开始。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NineKeyShuangpinKeyFace {
-    pub key: String,
-    pub initials: Vec<String>,
-    pub finals: Vec<String>,
-    pub zero_initial: bool,
-}
-
-impl From<NineKeyShuangpinKeyHint> for NineKeyShuangpinKeyFace {
-    fn from(hint: NineKeyShuangpinKeyHint) -> Self {
-        Self {
-            key: hint.key.to_string(),
-            initials: hint.initials,
-            finals: hint.finals,
-            zero_initial: hint.zero_initial,
-        }
-    }
-}
-
-/// 一个九键双拼方案在宿主看来的样子（`msime_client_nine_key_shuangpin_layout`）：输入法实际用的方案和它的表、键面，以及用户表的问题。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NineKeyShuangpinLayout {
-    /// 输入法实际用的方案：选了 `custom` 而表不能用时是默认的内置方案，与建会话时的回退相同。
-    pub effective: NineKeyShuangpinProfile,
-    /// `effective` 的表，按单位到数字的三个对象。
-    pub table: ShuangpinCustomProfile,
-    /// 选了 `custom` 时用户表的问题，能用时为空。
-    pub problem: Option<ShuangpinCustomProblem>,
-    /// 按电话键盘 1 到 9、0 的顺序，每个用到的数字键的键面。
-    pub keys: Vec<NineKeyShuangpinKeyFace>,
-}
-
-/// 选了 `profile`（`custom` 时用 `custom` 这张表）时输入法用哪张九键双拼表、键面写什么。不留存任何东西，设置页每改一个键都可以问。
-pub fn nine_key_shuangpin_layout(
-    profile: NineKeyShuangpinProfile,
-    custom: &ShuangpinCustomProfile,
-) -> NineKeyShuangpinLayout {
-    let problem = (profile == NineKeyShuangpinProfile::Custom)
-        .then(|| nine_key_shuangpin_custom_profile_problem(custom))
-        .flatten();
-    let effective = match profile {
-        NineKeyShuangpinProfile::Custom if problem.is_some() => NineKeyShuangpinProfile::default(),
-        other => other,
-    };
-    let table =
-        builtin_nine_key_shuangpin_custom_profile(effective).unwrap_or_else(|| custom.clone());
-    let keys = nine_key_shuangpin_table_key_hints(&engine_nine_key_shuangpin_table(&table))
-        .map(|hints| {
-            hints
-                .into_iter()
-                .map(NineKeyShuangpinKeyFace::from)
-                .collect()
-        })
-        .unwrap_or_default();
-    NineKeyShuangpinLayout {
-        effective,
-        table,
-        problem,
-        keys,
-    }
-}
-
-/// 偏好里的九键双拼网格。选了 `custom` 而表不能用时按默认的内置方案运行，同时返回原因，免得一张写坏的表让九键双拼打不了字。
-fn nine_key_shuangpin_grid(preferences: &Preferences) -> (KeyGrid, Option<String>) {
-    let kind = nine_key_shuangpin_kind(preferences.nine_key_shuangpin_profile);
-    let custom = engine_nine_key_shuangpin_table(&preferences.nine_key_shuangpin_custom_profile);
-    match resolve_nine_key_shuangpin(kind, Some(&custom)) {
-        Ok(table) => (KeyGrid::NineKeyShuangpin(table), None),
-        Err(error) => {
-            let fallback = nine_key_shuangpin_kind(NineKeyShuangpinProfile::default());
-            let table =
-                resolve_nine_key_shuangpin(fallback, None).expect("内置的九键双拼表一定合法");
-            (
-                KeyGrid::NineKeyShuangpin(table),
-                Some(format!(
-                    "Nine-key shuangpin table unusable because {error}; using {}.",
-                    fallback.name()
-                )),
-            )
-        }
-    }
-}
-
-fn wubi_profile_code(profile: WubiProfile) -> u8 {
-    match profile {
-        WubiProfile::Wubi86 => 0,
-        WubiProfile::Wubi98 => 1,
-        WubiProfile::WubiXsj => 2,
-    }
-}
-
-/// 交给 Engine 的 `enabled_schemes`：本版本提供的方案，版本带临时日文时再加上它要切到的日文方案。full 提供全部方案，得到的就是 [`SchemeSet::ALL`]，Engine 照旧构造全部 provider。
+/// 交给 Engine 的 `enabled_schemes`：本版本提供的拼音方案。
 fn engine_schemes(edition: &Edition) -> SchemeSet {
-    let offered = offered_input_schemes(edition)
+    offered_input_schemes(edition)
         .into_iter()
         .filter_map(|scheme| SchemeType::from_u8(scheme_code(scheme)))
-        .fold(SchemeSet::EMPTY, SchemeSet::with);
-    if edition.features.temporary_japanese {
-        offered.with(SchemeType::JapaneseRomaji)
-    } else {
-        offered
-    }
+        .fold(SchemeSet::EMPTY, SchemeSet::with)
 }
 
 fn scheme_code(scheme: InputScheme) -> u8 {
@@ -1913,36 +1196,13 @@ impl LanguageDictionaries {
         msime_path_trust::reject_symlinked_components(path).is_ok() && path.is_file()
     }
 
-    /// 每个词库优先用状态目录（`downloaded`）下已下载的词库更新或资源包里的那份，没有时用 HostOptions 记录的 `recorded` 目录里的那份（随包内置或旧版本留下的），两处都没有就是缺席。
-    pub(crate) fn resolve(
-        downloaded: Option<&DownloadedDictionaries>,
-        recorded: Option<&Path>,
-    ) -> Self {
+    /// 每个词库只用 HostOptions 记录的 `recorded` 目录（随包内置）里的那份；不在就是缺席。
+    pub(crate) fn resolve(recorded: Option<&Path>) -> Self {
         let find = |name: &str| {
-            downloaded
-                .and_then(|downloaded| {
-                    downloaded.updated_file(name).or_else(|| {
-                        resource_packs::installed_file(
-                            downloaded.root,
-                            ResourcePack::LanguageDictionaries,
-                            name,
-                        )
-                    })
-                })
-                .or_else(|| {
-                    recorded
-                        .filter(|directory| directory.is_absolute())
-                        // 更新目录已在上面校验；校验失败不能再把它当作普通随包路径采用。
-                        .filter(|directory| {
-                            !downloaded.is_some_and(|downloaded| {
-                                directory.starts_with(
-                                    downloaded.canonical_root().join("dictionary-updates"),
-                                )
-                            })
-                        })
-                        .map(|directory| directory.join(name))
-                        .filter(|path| Self::trusted_regular_file(path))
-                })
+            recorded
+                .filter(|directory| directory.is_absolute())
+                .map(|directory| directory.join(name))
+                .filter(|path| Self::trusted_regular_file(path))
         };
         LanguageDictionaries {
             cantonese: find("msime-cantonese.db"),
@@ -1966,18 +1226,9 @@ impl LanguageDictionaries {
         }
     }
 
-    /// The dictionaries an Engine was configured with, where an empty path means none.
-    fn of_options(options: &EngineOptions) -> Self {
-        let named = |path: &str| (!path.is_empty()).then(|| std::path::PathBuf::from(path));
-        LanguageDictionaries {
-            cantonese: named(&options.cantonese_dictionary),
-            zhuyin: named(&options.zhuyin_dictionary),
-            stroke: named(&options.stroke_dictionary),
-            wubi_missing: wubi_dictionary_missing(
-                Path::new(&options.resources),
-                &options.wubi_dictionary,
-            ),
-        }
+    /// The dictionaries an Engine was configured with. 拼音只读共享资源，没有单独的词库。
+    fn of_options(_options: &EngineOptions) -> Self {
+        LanguageDictionaries::default()
     }
 
     fn is_empty(&self) -> bool {
@@ -1996,31 +1247,9 @@ impl LanguageDictionaries {
     }
 }
 
-/// 已下载的日文资源包里的 `msime-japanese.dat`。`None` 时 Engine 读资源目录里的那份（完整发布包或开发环境内置的）。
-fn japanese_dictionary(downloaded: Option<&DownloadedDictionaries>) -> Option<PathBuf> {
-    let downloaded = downloaded?;
-    downloaded.updated_file("msime-japanese.dat").or_else(|| {
-        resource_packs::installed_file(
-            downloaded.root,
-            ResourcePack::Japanese,
-            "msime-japanese.dat",
-        )
-    })
-}
-
-/// 五笔码表 `msime-wubi.db` 的位置，资源目录 `resources` 里有它时为 `None`（Engine 读资源目录里的那份）。macOS 发布包和 Android 的 full、拼音版瘦包不带它，这时是词库更新里的那份或已下载的 `wubi` 资源包里的那份，都没有时为 `None`。
-fn wubi_dictionary(
-    downloaded: Option<&DownloadedDictionaries>,
-    resources: &Path,
-) -> Option<PathBuf> {
-    let name = msime_engine::assets::WUBI_DICTIONARY;
-    if resources.join(name).is_file() {
-        return None;
-    }
-    let downloaded = downloaded?;
-    downloaded
-        .updated_file(name)
-        .or_else(|| resource_packs::installed_file(downloaded.root, ResourcePack::Wubi, name))
+/// 五笔码表 `msime-wubi.db` 由 Engine 从资源目录读取；没有下载的资源包，所以这里总是空路径。
+fn wubi_dictionary() -> Option<PathBuf> {
+    None
 }
 
 /// 五笔方案此时有没有码表可读：本平台的发布包可以不带 `msime-wubi.db`（[`ON_DEMAND_ARTIFACTS`]），资源目录里没有它，宿主也没有交来下载的那份（`wubi_dictionary` 为空）。
@@ -2031,64 +1260,6 @@ pub(crate) fn wubi_dictionary_missing(resources: &Path, wubi_dictionary: &str) -
         .any(|group| group.contains(&name))
         && wubi_dictionary.is_empty()
         && !resources.join(name).is_file()
-}
-
-/// 一次解析（一次聚焦刷新或一次建会话）里，状态目录 `root` 下已下载词库的查找。
-///
-/// 一次解析要找粤拼、注音、笔画、日文和五笔最多五个文件，它们出自同一份词库更新：版本记录、资源锁、选择记录（`installed.json` 和它的逐层符号链接检查）、每个代次目录的规范化与校验，以及 `root` 的规范化，在这里各只做一次，这次要找的每个文件共用；文件本身的路径检查和长度检查仍逐个做。每一项都是第一次用到时才做，没用到的不做，与逐个文件查找时做的事相同。
-///
-/// 它只活在一次解析里，不跨调用保留：下一次聚焦或建会话重新读、重新做全部路径检查，所以设置应用随时换掉的选择记录下一次就会看到，没有要失效的缓存。
-pub(crate) struct DownloadedDictionaries<'a> {
-    root: &'a Path,
-    selection: std::cell::OnceCell<Option<msime_client_providers::dictionary_updates::Selection>>,
-    /// 选择记录里桌面词库代次和语言词库代次的目录，校验通过时为 `Some`。
-    verified: [std::cell::OnceCell<Option<PathBuf>>; 2],
-    canonical_root: std::cell::OnceCell<PathBuf>,
-}
-
-impl<'a> DownloadedDictionaries<'a> {
-    pub(crate) fn new(root: &'a Path) -> Self {
-        DownloadedDictionaries {
-            root,
-            selection: std::cell::OnceCell::new(),
-            verified: Default::default(),
-            canonical_root: std::cell::OnceCell::new(),
-        }
-    }
-
-    /// 已选中的词库更新里的 `name`。可选词库只读已经由设置宿主完整校验、原子发布的文件，不在聚焦输入框时联网。
-    fn updated_file(&self, name: &str) -> Option<PathBuf> {
-        let selection = self
-            .selection
-            .get_or_init(|| {
-                let edition = Edition::recorded_in(self.root).unwrap_or_else(Edition::full);
-                let baseline = edition.resource_set().ok()?;
-                msime_client_providers::dictionary_updates::selected(self.root, &baseline)
-            })
-            .as_ref()?;
-        let (set, verified) = [Some(&selection.desktop), selection.languages.as_ref()]
-            .into_iter()
-            .zip(&self.verified)
-            .find_map(|(set, verified)| {
-                set.filter(|set| set.artifacts.iter().any(|file| file.name == name))
-                    .map(|set| (set, verified))
-            })?;
-        let directory = verified
-            .get_or_init(|| {
-                let directory =
-                    msime_client_providers::dictionary_updates::directory(self.root, set).ok()?;
-                dictionary_updates::verify(self.root, &directory, set)?;
-                Some(directory)
-            })
-            .as_ref()?;
-        msime_client_providers::dictionary_updates::generation_file(directory, set, name)
-    }
-
-    /// 规范化后的 `root`，规范化失败时是 `root` 本身。
-    fn canonical_root(&self) -> &Path {
-        self.canonical_root
-            .get_or_init(|| std::fs::canonicalize(self.root).unwrap_or_else(|_| self.root.into()))
-    }
 }
 
 /// EngineOptions 里的路径文本，没有路径（或路径不是 UTF-8）时为空。
@@ -2106,20 +1277,8 @@ fn helpcode_fallback_resources(
     state_root: Option<&Path>,
     edition: &'static Edition,
 ) -> Option<String> {
-    if recorded.is_some() || resources.join("helpcodes").is_dir() {
-        return recorded;
-    }
-    recorded_helpcode_bundle(state_root?, &edition.resource_set().ok()?)
-}
-
-/// 更新记录里的随包资源目录，要求那里确实有 `helpcodes/`；`baseline` 是本版本编译进来的词库锁。
-fn recorded_helpcode_bundle(state_root: &Path, baseline: &ResourceSet) -> Option<String> {
-    let bundled =
-        msime_client_providers::dictionary_updates::bundled_resources(state_root, baseline)?;
-    if !bundled.join("helpcodes").is_dir() {
-        return None;
-    }
-    bundled.to_str().map(str::to_owned)
+    let _ = (state_root, edition);
+    recorded.filter(|_| resources.join("helpcodes").is_dir())
 }
 
 /// HostOptions 的 `preferences_directory`，只认绝对路径：按需下载的资源包装在它下面。
@@ -2159,24 +1318,6 @@ pub(crate) fn effective_scheme(
             "Input scheme {preferred:?} unavailable because {reason}; using {fallback:?}."
         )),
     )
-}
-
-/// 偏好里的方案本版本提供、却因为本机缺它的词库跑不了时（[`effective_scheme`] 因此回退），装上哪个资源包它就能跑：五笔是 `wubi`，粤拼、注音和笔画是 `language-dictionaries`。其余情况为 `None`。
-pub(crate) fn missing_scheme_pack(
-    preferred: InputScheme,
-    supported: &[InputScheme],
-    dictionaries: &LanguageDictionaries,
-) -> Option<ResourcePack> {
-    if !supported.contains(&preferred) || dictionaries.serve(preferred) {
-        return None;
-    }
-    match preferred {
-        InputScheme::Wubi => Some(ResourcePack::Wubi),
-        InputScheme::Cantonese | InputScheme::Zhuyin | InputScheme::Stroke => {
-            Some(ResourcePack::LanguageDictionaries)
-        }
-        _ => None,
-    }
 }
 
 /// 偏好里的双拼辅助码触发方式 → 引擎侧同名字段；写入端已归一，这里对消费端再归一一次兜底。
@@ -2415,20 +1556,8 @@ impl HostOptions {
     fn into_engine_options(self) -> EngineOptions {
         // 每个平台都这样查找；桌面宿主按发布包是否省略日文词典和语言词库决定是否从状态目录读取已下载资源。
         let state_root = absolute_state_root(self.preferences_directory.as_deref());
-        let downloaded = state_root.as_deref().map(DownloadedDictionaries::new);
-        let dictionaries = LanguageDictionaries::resolve(
-            downloaded.as_ref(),
-            self.language_dictionaries.as_deref().map(Path::new),
-        );
-        let japanese = japanese_dictionary(downloaded.as_ref());
-        let wubi = path_text(wubi_dictionary(
-            downloaded.as_ref(),
-            Path::new(&self.resources),
-        ));
-        let dictionaries = LanguageDictionaries {
-            wubi_missing: wubi_dictionary_missing(Path::new(&self.resources), &wubi),
-            ..dictionaries
-        };
+        let dictionaries =
+            LanguageDictionaries::resolve(self.language_dictionaries.as_deref().map(Path::new));
         // Session creation has no diagnostic to carry the reason; the fallback itself is what matters here.
         let edition = self.edition();
         let (scheme, _) = effective_scheme(
@@ -2444,10 +1573,6 @@ impl HostOptions {
             state_root.as_deref(),
             edition,
         );
-        let has_japanese_model = japanese.as_deref().is_some_and(Path::is_file)
-            || Path::new(&self.resources)
-                .join("msime-japanese.dat")
-                .is_file();
         let mut options = EngineOptions {
             resources: self.resources,
             user_data: self.user_data,
@@ -2461,8 +1586,6 @@ impl HostOptions {
             shuangpin_custom_profile: None,
             shuangpin_preedit_uses_raw: self.preferences.shuangpin_preedit_uses_raw,
             shuangpin_preedit_separated: self.preferences.shuangpin_preedit_separated,
-            force_cantonese_shuangpin: force_cantonese_shuangpin(scheme, &self.preferences),
-            cantonese_output_conversion: cantonese_output_conversion(&self.preferences),
             single_character_only: self.preferences.single_character_only,
             caret_edit_suffix: caret_edit_suffix_applies(&self.preferences),
             learning: self.preferences.learning,
@@ -2471,10 +1594,6 @@ impl HostOptions {
             autocorrect_transposition: self.preferences.quanpin.autocorrect_transposition,
             autocorrect_neighbor: self.preferences.quanpin.autocorrect_neighbor,
             fuzzy_pinyin_rules: self.preferences.fuzzy_pinyin.active_rules(),
-            wubi_mixed_pinyin: self.preferences.wubi_mixed_pinyin,
-            wubi_z_wildcard: self.preferences.wubi_z_wildcard,
-            wubi_profile: wubi_profile_code(self.preferences.wubi_profile),
-            wubi_reverse_code: self.preferences.wubi_code_hint,
             frequency_mode: self.preferences.frequency.mode.as_str().into(),
             frequency_trigger_count: self.preferences.frequency.trigger_count,
             frequency_linear_step: self.preferences.frequency.linear_step,
@@ -2487,12 +1606,6 @@ impl HostOptions {
             mixed_emoji: self.preferences.mixed_input.emoji,
             mixed_kaomoji: self.preferences.mixed_input.kaomoji,
             mixed_symbols: self.preferences.mixed_input.symbols,
-            mixed_japanese: self.preferences.mixed_input.japanese,
-            multilingual_languages: multilingual_languages_for(
-                &self.preferences,
-                edition,
-                has_japanese_model,
-            ),
             local_unicode: self.preferences.local_modes.unicode,
             local_date_time: self.preferences.local_modes.date_time,
             local_date_time_inline: self.preferences.local_modes.date_time_inline,
@@ -2532,23 +1645,11 @@ impl HostOptions {
             ),
             rescoring_context: String::new(),
             sentence_alternatives: true,
-            vietnamese_input_method: vietnamese_input_method_code(self.preferences.vietnamese),
-            vietnamese_tone_style: vietnamese_tone_style_code(self.preferences.vietnamese),
-            korean_layout: korean_layout_code(
-                self.preferences.korean,
-                self.korean_romaja.unwrap_or(false),
-            ),
-            cantonese_dictionary: path_text(dictionaries.cantonese),
-            zhuyin_dictionary: path_text(dictionaries.zhuyin),
-            stroke_dictionary: path_text(dictionaries.stroke),
-            japanese_dictionary: path_text(japanese),
-            wubi_dictionary: wubi,
             helpcode: helpcode.enabled,
             strict_quanpin_helpcode: helpcode.strict_filter,
             show_helpcode: helpcode.show_in_candidate_window,
             // 双拼专属的触发方式；其它方案给默认值，引擎只在双拼下读它。手改出互斥组合的文档在消费端再归一一次，与 `PreferencesStore::save` 的写入端归一一致。
             shuangpin_helpcode_modes: shuangpin_helpcode_modes(helpcode.modes),
-            grid_helpcode: helpcode.grid,
             helpcode_schema: helpcode.schema.as_str().into(),
             helpcode_trigger_key: helpcode.trigger_key.bytes().next(),
             chinese_punctuation: engine_chinese_punctuation(
@@ -2676,15 +1777,13 @@ fn bundled_settled_model(resources: &str, recorded: Option<&str>) -> Option<Path
     path.is_file().then_some(path)
 }
 
-/// 会话使用的落定重排模型文件：随包的优先，随包的不在时（Windows 和 macOS 的发布包不再内置它）用 `state_root` 下已下载的 `settled-model` 资源包，都没有时为 `None`。旧版本写下的 HostOptions 可能还记着已被升级删掉的随包路径，那个文件不在了也照样落到资源包。
+/// 会话使用的落定重排模型文件：只有随包的那份，资源包下载已移除。
 pub(crate) fn settled_model_file(
     resources: &str,
     recorded: Option<&str>,
-    state_root: Option<&Path>,
+    _state_root: Option<&Path>,
 ) -> Option<PathBuf> {
-    bundled_settled_model(resources, recorded).or_else(|| {
-        resource_packs::installed_file(state_root?, ResourcePack::SettledModel, SETTLED_MODEL_FILE)
-    })
+    bundled_settled_model(resources, recorded)
 }
 
 /// 把会话的落定重排模型接上了没有写进诊断日志：会话建立时、开关打开时和模型文件变了（资源包装好或移除）换上之后各一行，按键和评分路径上不写。只在「桌面神经联想」开着时由调用方报告，关着的用户不会看到这些行。
@@ -2711,7 +1810,7 @@ pub(crate) fn report_settled_model(
             "settled model missing",
             &format!(
                 "no settled-model pack under {}",
-                resource_packs::root(state_root).display()
+                state_root.display()
             ),
         ),
         (None, None) => diagnostics::report(
@@ -2729,30 +1828,19 @@ pub fn packaged_settled_model(host_options: &Value) -> Option<PathBuf> {
     )
 }
 
-/// HostOptions 文档（`host_options`）所描述的安装布局是否随包带齐了粤拼、注音和笔画词库，也就是 `language_dictionaries` 记录的目录里三个文件都在。设置应用据此决定 Windows 和 Linux 上要不要提供 `language-dictionaries` 资源包的下载：没带齐的安装（打包时没有词库、或不带它们的 Nix 包）只能靠它补上，会话里每个词库都优先用资源包里的那份。
-///
-/// 记录的目录是词库更新下载的语言代次（[`inside_dictionary_updates`]）时，代次本身不算：它和下载它时的词库锁绑在一起，升级换锁后会话就不再选用它。这时改看更新记录里原安装包旁边的 `language-dictionaries/`（[`recorded_bundled_resources`]），安装包本身带齐了就算带齐；找不到安装包目录（换锁后更新记录不再有效）时按没带齐处理，只有资源包能长期提供这几份词库。
+/// HostOptions 文档（`host_options`）所描述的安装布局是否随包带齐了粤拼、注音和笔画词库。
 pub fn packaged_language_dictionaries(host_options: &Value) -> bool {
     let recorded = host_options
         .get("language_dictionaries")
         .and_then(Value::as_str)
         .map(Path::new);
-    let recorded = match (recorded, document_state_root(host_options)) {
-        (Some(recorded), Some(state)) if inside_dictionary_updates(recorded, &state) => {
-            recorded_bundled_resources(host_options, &state)
-                .and_then(|bundled| language_dictionaries_directory(&bundled))
-        }
-        (recorded, _) => recorded.map(Path::to_path_buf),
-    };
-    let dictionaries = LanguageDictionaries::resolve(None, recorded.as_deref());
+    let dictionaries = LanguageDictionaries::resolve(recorded);
     dictionaries.cantonese.is_some()
         && dictionaries.zhuyin.is_some()
         && dictionaries.stroke.is_some()
 }
 
-/// HostOptions 文档（`host_options`）的资源目录本身是否带着五笔码表 `msime-wubi.db`（普通文件，路径上没有符号链接）。设置应用据此决定 macOS 上要不要提供并在启动时补下 `wubi` 资源包。
-///
-/// 资源目录是词库更新下载的代次（[`inside_dictionary_updates`]）时，代次里的码表不算随包：更新只在资源目录或资源包已有码表时才下载它的新版本，所以代次里的码表可能来自不带码表的发布包之前的那一版；代次又和下载它时的词库锁绑在一起，应用升级换锁后 `dictionary_updates::selected` 不再选用它，会话回到不带码表的发布包，五笔就回退到全拼。这时改看更新记录里的原安装包目录（[`recorded_bundled_resources`]）：发布包本身带着码表（水杉五笔）就算随包；找不到安装包目录（换锁后更新记录不再有效）时按不随包处理，只有 `wubi` 资源包能跨过换锁一直在。
+/// HostOptions 文档（`host_options`）的资源目录本身是否带着五笔码表 `msime-wubi.db`。
 pub fn packaged_wubi_dictionary(host_options: &Value) -> bool {
     let Some(resources) = host_options
         .get("resources")
@@ -2762,89 +1850,9 @@ pub fn packaged_wubi_dictionary(host_options: &Value) -> bool {
     else {
         return false;
     };
-    let packaged = match document_state_root(host_options) {
-        Some(state) if inside_dictionary_updates(resources, &state) => {
-            recorded_bundled_resources(host_options, &state)
-        }
-        _ => Some(resources.to_path_buf()),
-    };
-    packaged.is_some_and(|resources| {
-        LanguageDictionaries::trusted_regular_file(
-            &resources.join(msime_engine::assets::WUBI_DICTIONARY),
-        )
-    })
-}
-
-/// 词库更新记录里、与文档版本（`edition`）当前词库锁对得上的那份原安装包资源目录，只认绝对路径下仍存在的目录。应用升级换锁后更新记录不再有效，这里为 `None`。
-fn recorded_bundled_resources(host_options: &Value, state_root: &Path) -> Option<PathBuf> {
-    let baseline = Edition::of_host_options(host_options)?
-        .resource_set()
-        .ok()?;
-    msime_client_providers::dictionary_updates::bundled_resources(state_root, &baseline)
-        .filter(|bundled| bundled.is_absolute() && bundled.is_dir())
-}
-
-/// HostOptions 文档的绝对 `preferences_directory`，按需下载的资源包和词库更新都在它下面。
-fn document_state_root(host_options: &Value) -> Option<PathBuf> {
-    absolute_state_root(
-        host_options
-            .get("preferences_directory")
-            .and_then(Value::as_str),
+    LanguageDictionaries::trusted_regular_file(
+        &resources.join(msime_engine::assets::WUBI_DICTIONARY),
     )
-}
-
-/// `path` 是否在状态目录 `state_root` 的 `dictionary-updates/` 下，也就是词库在线更新下载的代次。路径和状态目录各按字面和规范化后的写法比较，macOS 的 `/var` 与 `/private/var` 这类别名都认得出。
-fn inside_dictionary_updates(path: &Path, state_root: &Path) -> bool {
-    let canonical =
-        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let paths = [path.to_path_buf(), canonical(path)];
-    [state_root.to_path_buf(), canonical(state_root)]
-        .iter()
-        .map(|state| state.join("dictionary-updates"))
-        .any(|updates| paths.iter().any(|path| path.starts_with(&updates)))
-}
-
-/// The offline gloss dictionary for one non-English target language installed beside a resource bundle, when one is there: `offline-glosses/zh-<language>.db`, built by `scripts/build_offline_glosses.py` and pinned by `resources/offline-glosses.lock.json`. A sibling of `resources` for the same reason as `settled_model_beside`: the resource directory must match the shared dictionary lock exactly, and a host ships only the languages it wants. Absence is the normal case.
-pub(crate) fn offline_glosses_beside(
-    resources: &std::path::Path,
-    language: &str,
-) -> Option<std::path::PathBuf> {
-    if !OFFLINE_GLOSS_LANGUAGES.contains(&language) {
-        return None;
-    }
-    let path = resources
-        .parent()?
-        .join("offline-glosses")
-        .join(format!("zh-{language}.db"));
-    path.is_file().then_some(path)
-}
-
-/// 一种非英文目标语言的离线释义词典：资源目录旁随包的那份优先，没有时用 `state_root` 下已下载的 `offline-glosses` 资源包里的那份（Android 的发布包不再内置它们，用户打开离线释义时下载），都没有时为 `None`。
-pub(crate) fn offline_glosses_file(
-    resources: &Path,
-    state_root: Option<&Path>,
-    language: &str,
-) -> Option<PathBuf> {
-    offline_glosses_beside(resources, language)
-        .or_else(|| {
-            let state = state_root?;
-            let edition = Edition::recorded_in(state).unwrap_or_else(Edition::full);
-            let original = msime_client_providers::dictionary_updates::bundled_resources(
-                state,
-                &edition.resource_set().ok()?,
-            )?;
-            offline_glosses_beside(&original, language)
-        })
-        .or_else(|| {
-            if !OFFLINE_GLOSS_LANGUAGES.contains(&language) {
-                return None;
-            }
-            resource_packs::installed_file(
-                state_root?,
-                ResourcePack::OfflineGlosses,
-                &format!("zh-{language}.db"),
-            )
-        })
 }
 
 /// The Cantonese, Zhuyin and Stroke dictionaries installed beside a resource bundle: `language-dictionaries/msime-cantonese.db`, `language-dictionaries/msime-zhuyin.db` and `language-dictionaries/msime-stroke.db`, built by `msime-dict-builder`. A sibling of `resources` for the same reason as `settled_model_beside`: the resource directory must match the shared dictionary lock exactly, and only the hosts that offer these schemes ship them. Absence is the normal case.
@@ -2866,9 +1874,6 @@ pub fn installed_language_dictionaries(resources: &std::path::Path) -> Option<St
     language_dictionaries_directory(resources)
         .and_then(|directory| directory.to_str().map(str::to_owned))
 }
-
-/// The target languages an offline gloss dictionary can exist for; English is glossed from the packaged msime-english.db instead.
-pub(crate) const OFFLINE_GLOSS_LANGUAGES: [&str; 6] = ["fr", "ja", "es", "ru", "de", "ko"];
 
 /// Drop the `\\?\` prefix Windows canonicalisation adds.
 ///
@@ -2983,16 +1988,10 @@ pub fn runtime_resources_ready(document: &Value) -> bool {
             return Some(false);
         }
         let baseline = Edition::of_host_options(document)?.resource_set().ok()?;
-        let selected = dictionary_updates::selected_resources(state, &baseline);
-        let specification = selected
-            .as_ref()
-            .filter(|(path, _)| path == resources)
-            .map(|(_, set)| set)
-            .unwrap_or(&baseline);
         Some(runtime_resources_ready_with(
             resources,
             state,
-            specification,
+            &baseline,
             ON_DEMAND_ARTIFACTS,
         ))
     };
@@ -3055,98 +2054,21 @@ fn adopt_custom_helpcodes(state_root: &Path, sources: &[&Path]) {
     }
 }
 
-/// 安装选择与随包基线共用准备流程，测试用小型真实词库验证代次切换与日志回放。
+/// 安装选择与随包基线共用准备流程。
 fn prepare_host_with_updates(
     resources: &Path,
     state_root: &Path,
     edition: &'static Edition,
     specification: &ResourceSet,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let selected_update = dictionary_updates::selected_resources(state_root, specification);
-    let recorded_bundle =
-        msime_client_providers::dictionary_updates::bundled_resources(state_root, specification);
-    let mut sources = vec![resources];
-    sources.extend(recorded_bundle.as_deref());
-    sources.extend(
-        selected_update
-            .as_ref()
-            .map(|(updated, _)| updated.as_path()),
-    );
-    adopt_custom_helpcodes(state_root, &sources);
-    if let Some((updated, selected)) = selected_update {
-        if verify_resources_once(&updated, &selected, state_root, &[]).is_ok() {
-            // 下载代次的 `<代次>.lock` 同理先建好，只读的宿主才取得到它的租约。
-            drop(msime_client_providers::dictionary_updates::lease(
-                state_root, &updated,
-            ));
-            let mut document: Value = serde_json::from_str(&prepare_shipped_host_configuration(
-                &updated,
-                state_root,
-                &selected,
-                &[],
-                edition,
-            )?)?;
-            attach_bundle_beside_update(
-                &mut document,
-                resources,
-                state_root,
-                specification,
-                edition,
-            );
-            return Ok(serde_json::to_string_pretty(&document)?);
-        }
-    }
-    // 记录的 resources 已属于下载代次时，回退仍需回到安装包目录。
-    let bundled =
-        msime_client_providers::dictionary_updates::bundled_resources(state_root, specification)
-            .filter(|p| p.is_dir());
+    adopt_custom_helpcodes(state_root, &[resources]);
     prepare_shipped_host_configuration(
-        bundled.as_deref().unwrap_or(resources),
+        resources,
         state_root,
         specification,
         ON_DEMAND_ARTIFACTS,
         edition,
     )
-}
-
-/// 资源换成下载代次时，把不属于主词库代次的随包内容（独立模型、音效、插件、辅助码表、语言词库）指回安装包。
-fn attach_bundle_beside_update(
-    document: &mut Value,
-    resources: &Path,
-    state_root: &Path,
-    specification: &ResourceSet,
-    edition: &'static Edition,
-) {
-    // 随包的独立模型、音效和插件不属于主词库代次，保留原有入口。
-    let original =
-        msime_client_providers::dictionary_updates::bundled_resources(state_root, specification)
-            .filter(|p| p.is_dir())
-            .unwrap_or_else(|| resources.to_path_buf());
-    for (key, name) in [
-        ("sound_packs", "sound-packs"),
-        ("plugin_packs", "plugin-packs"),
-    ] {
-        if let Some(path) = original
-            .parent()
-            .map(|p| p.join(name))
-            .filter(|p| p.is_dir())
-        {
-            document[key] = json!(path);
-        }
-    }
-    if let Some(model) = settled_model_beside(&original) {
-        document["settled_model"] = json!(model);
-    }
-    // 辅助码表也不在词库发布里，下载的代次目录没有 `helpcodes/`。这里直接记下当前安装包的目录：iOS 每次 App 更新都换安装路径，更新记录里的随包目录会失效，`helpcode_fallback_resources()` 只能从记录里找。
-    if original.join("helpcodes").is_dir() {
-        document["helpcode_fallback_resources"] = json!(original);
-    }
-    if let Some(languages) = dictionary_updates::languages(state_root, edition)
-        .and_then(|p| p.to_str().map(str::to_owned))
-        .or_else(|| installed_language_dictionaries(&original))
-    {
-        document["language_dictionaries"] = json!(languages);
-    }
 }
 
 /// 状态目录里 `edition` 的偏好。还没有偏好文件时，先把此刻读到的偏好写成第一份文件（[`PreferencesStore::write_first_document`]），理由见 [`prepare_host_configuration_for_edition`]。必须在建用户词库代次之前调用：没有偏好文件时，状态目录有没有被准备过决定触屏键盘按新装还是按升级前的默认方案。
@@ -3401,26 +2323,11 @@ fn refresh_options_file(
     // 文档记录的版本，缺省是 full。新代次按同一个版本准备；`refreshed_layout` 只替换 `resources` 和 `dictionaries`，`edition` 键原样保留。
     let edition =
         Edition::of_host_options(&document).ok_or("runtime options name an unknown edition")?;
-    // 已安装的代次要和 `prepare_host_configuration_for_edition` 用同一份锁比较，否则不是 full 的版本每次刷新都会被当成过期。
     let baseline = edition.resource_set()?;
-    let state = document["preferences_directory"].as_str().map(Path::new);
-    let updated = state
-        .and_then(|state| dictionary_updates::selected_resources(state, &baseline))
-        .filter(|(path, set)| {
-            state.is_some_and(|state| verify_resources_once(path, set, state, &[]).is_ok())
-        });
-    let specification = updated.as_ref().map(|(_, set)| set).unwrap_or(&baseline);
-    let fallback = state.and_then(|state| {
-        msime_client_providers::dictionary_updates::bundled_resources(state, &baseline)
-    });
     let prepared = refreshed_host_options(
         &document,
-        &specification.generation()?,
-        updated
-            .as_ref()
-            .map(|(path, _)| path.as_path())
-            .or(bundled)
-            .or(fallback.as_deref()),
+        &baseline.generation()?,
+        bundled,
         Path::is_dir,
         |resources, state| {
             Ok(serde_json::from_str(
@@ -3527,23 +2434,12 @@ pub fn publish_prepared_dictionaries(
 }
 
 /// 随包资源所在的目录：安装包里 Engine 资源目录的上一级，设置应用在这里找背单词的内置词书（`wordbooks/`）。
-///
-/// 词库在线更新后，准备出的文档里 `resources` 指向状态目录下的下载代次，那里没有随包资源；这时取更新记录里的原安装包目录，与 [`prepare_host_with_updates`] 给音效包和插件包定位、[`with_installed_language_dictionaries`] 找语言词库的规则相同。文档不是准备布局、或没有可用的更新记录时用 `resources` 本身；`resources` 不是绝对路径时为 `None`。
 pub fn bundled_resource_root(document: &Value) -> Option<PathBuf> {
-    let resources = document
+    document
         .get("resources")
         .and_then(Value::as_str)
         .map(Path::new)
-        .filter(|resources| resources.is_absolute())?;
-    let bundled = prepared_layout(document)
-        .and_then(|(_, _, state)| {
-            let baseline = Edition::of_host_options(document)?.resource_set().ok()?;
-            msime_client_providers::dictionary_updates::bundled_resources(state, &baseline)
-        })
-        .filter(|bundled| bundled.is_dir());
-    bundled
-        .as_deref()
-        .unwrap_or(resources)
+        .filter(|resources| resources.is_absolute())?
         .parent()
         .map(Path::to_path_buf)
 }
@@ -3653,19 +2549,8 @@ fn with_installed_language_dictionaries(
     {
         return Ok(None);
     }
-    // 主词库可以位于下载代次中，语言词库仍由更新记录或原安装包提供。
-    let installed = installed_language_dictionaries(resources).or_else(|| {
-        let edition = Edition::of_host_options(document)?;
-        dictionary_updates::languages(state, edition)
-            .and_then(|path| path.to_str().map(str::to_owned))
-            .or_else(|| {
-                let baseline = edition.resource_set().ok()?;
-                let bundled = msime_client_providers::dictionary_updates::bundled_resources(
-                    state, &baseline,
-                )?;
-                installed_language_dictionaries(&bundled)
-            })
-    });
+    let _ = state;
+    let installed = installed_language_dictionaries(resources);
     if recorded == installed.as_deref() {
         return Ok(None);
     }
@@ -3812,13 +2697,6 @@ pub fn local_emoji_catalog_slice(
         .map_err(|_| "local emoji catalog unavailable")
 }
 
-pub use msime_client_services::plugins::symbol_set::PluginSymbolGroup;
-
-/// 插件目录 `root` 下已安装的符号集的全部组，供宿主追加到内置符号目录之后：`symbols` 组放在以 `pack_name` 为上级分类的分组下，`kaomoji` 组放在颜文字的 All 之后。读几个小清单：不要在按键路径上调用。
-pub fn plugin_symbol_groups(root: &std::path::Path) -> Vec<PluginSymbolGroup> {
-    msime_client_services::plugins::symbol_set::plugin_symbol_groups(root)
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct LocalSymbolCatalogGroup {
     pub parent: String,
@@ -3959,29 +2837,9 @@ fn dispatch_value(
             Action::Character { value: b'$', .. } | Action::Punctuation(b'$')
         );
         let pending = session.lifecycle_input(&action, host);
-        // Which row the user reached for, read before dispatching because the view it is
-        // relative to is gone afterwards. Every platform host routes candidate selection
-        // through here, so counting it here covers all of them without a line of platform
-        // code; doing it per host would have meant six chances to forget.
-        let position = selected_position(&action);
-        let efficiency = position.and_then(|_| session.efficiency_candidate(&action));
         let result = session.runtime.dispatch(action).map_err(|e| e.to_string());
         // 报错前 runtime 可能已经改了组字，生命周期照样收尾。
         let mut result = session.lifecycle_on_error(pending, result)?;
-        // Text the Engine generated (a calculator result, a command, a mention) was picked, not typed, and stays out of the statistics the way it stays out of learning.
-        let counts_as_typing = result
-            .commit_context
-            .as_ref()
-            .is_none_or(|context| context.typing_statistics);
-        if result.commit.is_some() && counts_as_typing {
-            // 先记效率再记位置：位置攒满一批会立刻写盘并带走待写的效率，这一次的效率要赶上同一批，否则进程在下一批之前被杀就丢了。
-            if let Some(candidate) = efficiency {
-                session.count_efficiency(candidate);
-            }
-            if let Some(position) = position {
-                session.count_selection(position);
-            }
-        }
         let facts = session.runtime.facts();
         // 固定标点表返回全角人民币；半角只改本次 `$` 产生的尾巴，候选和短语里的符号保持原文。
         if currency_punctuation
@@ -4012,227 +2870,3 @@ fn dispatch_value(
     })
 }
 
-/// The one-based position of the candidate an action is about, or `None` when it is not about one.
-///
-/// Both selection actions carry the absolute candidate index from the runtime's generation, so
-/// adding a view page offset would double-count candidates after the first page.
-fn selected_position(action: &Action) -> Option<usize> {
-    match action {
-        // Candidate IDs carry the absolute index in the cached generation, even
-        // when the view only shows one page. Adding the page offset here counted
-        // every selection after the first page twice (and pushed it into the
-        // aggregate `beyond` bucket in typing statistics).
-        Action::Select(id) => Some(id.index + 1),
-        Action::SelectAnyCandidate(id) => Some(id.index + 1),
-        _ => None,
-    }
-}
-
-/// 上屏效率（少按键、联想、整句）只在 Android 上计：只有 Android 的统计页显示它，其他宿主不为它多查读音。测试里也打开，好覆盖计法。
-const COUNTS_COMMIT_EFFICIENCY: bool = cfg!(any(target_os = "android", test));
-
-/// Android 宿主在隐私模式和不学习的输入框里、鸿蒙和 iOS 宿主在隐私模式里经 `msime_client_set_private_session` 标出隐私会话；这时选词位置和上屏效率都不计（鸿蒙和 iOS 本来就不计上屏效率）。其他宿主不变。
-const PRIVATE_SESSIONS_SKIP_STATISTICS: bool = cfg!(any(
-    target_os = "android",
-    target_env = "ohos",
-    target_os = "ios",
-    test
-));
-
-/// 候选词翻译开着且范围是「仅当前高亮」：翻译查询只为高亮的候选请求候选词翻译，运行时只把它画在高亮行。
-pub(crate) fn translation_scope_highlighted(preferences: &Preferences) -> bool {
-    preferences.candidate_translations
-        && preferences.candidate_translation_scope
-            == msime_client_core::preferences::CandidateTranslationScope::Highlighted
-}
-
-/// `translation_query` 使用的偏好字段；这些变化都要撤销旧代次的释义回包。
-fn translation_query_preferences_changed(previous: &Preferences, next: &Preferences) -> bool {
-    previous.candidate_translations != next.candidate_translations
-        || previous.candidate_translation_scope != next.candidate_translation_scope
-        || previous.candidate_english_gloss != next.candidate_english_gloss
-        || previous.candidate_pronunciation != next.candidate_pronunciation
-        || previous.translation_target_language != next.translation_target_language
-        || previous.translation_secondary_language != next.translation_secondary_language
-        || previous.local_translation != next.local_translation
-        || previous.translation_account != next.translation_account
-        || previous.custom_translation != next.custom_translation
-        || previous.tencent_tmt != next.tencent_tmt
-        || previous.niutrans != next.niutrans
-}
-
-/// 一个会话在两次写统计之间最多记下多少次上屏。正常情况下 `SELECTION_BATCH` 次选词就会写一次，这只是兜底。
-const EFFICIENCY_BATCH_LIMIT: usize = 256;
-
-/// 等后台写进统计的上屏批次，和是否已有一个线程在写。
-struct EfficiencyQueue {
-    /// 每一批：查读音用的 Engine 选项、写入的统计目录和这批上屏。
-    pending: Vec<(EngineOptions, PathBuf, Vec<EfficiencyCandidate>)>,
-    running: bool,
-}
-
-static EFFICIENCY_QUEUE: Mutex<EfficiencyQueue> = Mutex::new(EfficiencyQueue {
-    pending: Vec::new(),
-    running: false,
-});
-
-fn efficiency_queue() -> std::sync::MutexGuard<'static, EfficiencyQueue> {
-    EFFICIENCY_QUEUE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// 同一时间只有一个线程写效率：已有线程在写时，这一批排进队列由它接着写，不再每次写统计都另开一个线程、另开一次词库。线程在队列空了时才在同一把锁下退出，所以排进去的批次不会没人写。
-fn record_efficiency_in_background(
-    options: EngineOptions,
-    directory: PathBuf,
-    commits: Vec<EfficiencyCandidate>,
-) {
-    {
-        let mut queue = efficiency_queue();
-        queue.pending.push((options, directory, commits));
-        if queue.running {
-            return;
-        }
-        queue.running = true;
-    }
-    /// 写的时候 panic 也要放下 `running`，否则之后的效率再也没人写。正常退出在看到队列为空的同一把锁下放下，不经过这里。
-    struct Running;
-    impl Drop for Running {
-        fn drop(&mut self) {
-            if std::thread::panicking() {
-                efficiency_queue().running = false;
-            }
-        }
-    }
-    let worker = move || {
-        let _running = Running;
-        loop {
-            let batches = {
-                let mut queue = efficiency_queue();
-                if queue.pending.is_empty() {
-                    queue.running = false;
-                    return;
-                }
-                std::mem::take(&mut queue.pending)
-            };
-            for (options, directory, commits) in batches {
-                record_efficiency(&options, &directory, &commits);
-            }
-        }
-    };
-    if std::thread::Builder::new()
-        .name("msime-typing-efficiency".into())
-        .spawn(worker)
-        .is_err()
-    {
-        // 开不了线程时批次留在队列里，下一次写统计再试。
-        efficiency_queue().running = false;
-    }
-}
-
-/// 把一批上屏算成效率计数写进统计目录 `directory`（[`HostSession::statistics_directory`]）：`typed_keys` 是候选输入码里的字母和数字，`spelled_keys` 是用拼音逐字打出这段文字要按的键数（按全拼数读音字母，双拼也以全拼为基准）；查不到读音（英文、表情、非拼音方案）时按打了多少算多少，不算少按也不算多按。尽力而为：写不进就丢掉。
-fn record_efficiency(options: &EngineOptions, directory: &Path, commits: &[EfficiencyCandidate]) {
-    let mut efficiency = CommitEfficiency::default();
-    for commit in commits {
-        let spelled_keys = spelling_keys(options, &commit.text).unwrap_or(commit.typed_keys);
-        efficiency.count_commit(
-            commit.typed_keys,
-            spelled_keys,
-            commit.sentence,
-            commit.prediction,
-        );
-    }
-    let _ = TypingStatisticsStore::new(directory).record_efficiency(&efficiency);
-}
-
-/// 用全拼打出 `text` 要按的键数，作为「少按键」的基准：只有拼音系方案（全拼含九键、双拼）有答案，双拼也按全拼计，这样统计页的「比全拼少按」对双拼用户才有意义。读音来自 Engine 的 `hanzi_to_pinyin`，它先查整词、再逐字回退。
-fn spelling_keys(options: &EngineOptions, text: &str) -> Option<u64> {
-    match SchemeType::from_u8(options.scheme)? {
-        SchemeType::Quanpin | SchemeType::Shuangpin => {}
-        _ => return None,
-    }
-    let reading = msime_engine::host::hanzi_to_pinyin(options, text);
-    if reading.is_empty() {
-        return None;
-    }
-    Some(
-        reading
-            .split('\'')
-            .map(|syllable| syllable.bytes().filter(u8::is_ascii_alphabetic).count() as u64)
-            .sum(),
-    )
-}
-
-/// 派发选择前从视图里读出的那个候选。
-struct EfficiencyCandidate {
-    text: String,
-    typed_keys: u64,
-    sentence: bool,
-    prediction: bool,
-}
-
-/// How many committing selections a session holds in memory before handing them to the process's pending typing-statistics batch.
-///
-/// 交出去只是加内存里的计数（`flush_selections`），写文件跟着宿主经 `record` 攒的上屏走：满间隔的 `record`、失焦和销毁、读统计的操作。会话在失焦和销毁时也会交出手里的选词，所以这个数只限定输入框用着时有多少选词赶不上定期的写，也就是进程在输入框里被杀时丢多少：iOS 键盘扩展和 Android 输入法进程可能既不失焦也不销毁就被杀掉。32 次选词是几十秒的输入，对一个只报比例的统计丢得起，也免得每次选词都去取进程级的那把锁。
-const SELECTION_BATCH: u64 = 32;
-
-
-/// 只看偏好时，运行 `scheme` 的会话以哪种组码网格开始（宿主的 `msime_client_set_key_grid` 和 `msime_client_set_nine_key_mode` 仍可覆盖，但覆盖只对设下它时的方案有效）。Android 和 iOS 双拼看独立的 `touch_shuangpin_layout`，14 键和 18 键按当前 26 键方案派生；其他宿主保留但忽略这个偏好。Android 和 iOS 五笔看独立的 `touch_wubi_layout`，14 键与全拼 14 键同一种网格；鸿蒙的五笔 14 键由宿主自己按偏好调用 `msime_client_set_key_grid`。全拼看 `touch_keyboard_layout`：九键是九键，14 键是 14 键，18 键只在 Android 和 iOS 上开启（鸿蒙的全拼 18 键由宿主自己按偏好调用 `msime_client_set_key_grid`，其他宿主还没有对应键面），九键双拼按 `nine_key_shuangpin_profile` 取表（自定义表不能用时按默认的内置方案）。注音只有九键，还要选了「注音 9 键」触屏方案，这个方案只有 Android 键盘会写：`touch_keyboard_layout` 是所有方案共用的一个字段，桌面宿主为全拼九宫格设它（Linux 的九键开关），那里的注音会话必须留在大千键位，不能继承九宫格。
-pub(crate) fn layout_key_grid(
-    scheme: Option<SchemeType>,
-    preferences: &Preferences,
-) -> Option<KeyGrid> {
-    layout_key_grid_for(ffi::host::compiled_platform(), scheme, preferences)
-}
-
-fn layout_key_grid_for(
-    platform: HostPlatform,
-    scheme: Option<SchemeType>,
-    preferences: &Preferences,
-) -> Option<KeyGrid> {
-    if matches!(platform, HostPlatform::Android | HostPlatform::Ios)
-        && scheme == Some(SchemeType::Shuangpin)
-        && preferences.touch_keyboard_layout != TouchKeyboardLayout::Handwriting
-    {
-        match preferences.touch_shuangpin_layout {
-            TouchShuangpinLayout::FourteenKey => {
-                return Some(fourteen_key_shuangpin_grid(preferences))
-            }
-            TouchShuangpinLayout::EighteenKey => {
-                return Some(eighteen_key_shuangpin_grid(preferences))
-            }
-            TouchShuangpinLayout::TwentySixKey => {}
-        }
-    }
-    // 五笔 14 键与全拼 14 键同一个键面，引擎按组展开码表；手写布局不画字母键。
-    if scheme == Some(SchemeType::Wubi) {
-        return (matches!(platform, HostPlatform::Android | HostPlatform::Ios)
-            && preferences.touch_wubi_layout == TouchWubiLayout::FourteenKey
-            && preferences.touch_keyboard_layout != TouchKeyboardLayout::Handwriting)
-            .then_some(KeyGrid::FourteenKey);
-    }
-    match (preferences.touch_keyboard_layout, scheme) {
-        (TouchKeyboardLayout::NineKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::NineKey),
-        (TouchKeyboardLayout::FourteenKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::FourteenKey),
-        (TouchKeyboardLayout::EighteenKey, Some(SchemeType::Quanpin))
-            if matches!(platform, HostPlatform::Android | HostPlatform::Ios) =>
-        {
-            Some(KeyGrid::EighteenKey)
-        }
-        (TouchKeyboardLayout::NineKeyShuangpin, Some(SchemeType::Quanpin)) => {
-            Some(nine_key_shuangpin_grid(preferences).0)
-        }
-        (TouchKeyboardLayout::NineKey, Some(SchemeType::Zhuyin)) => {
-            let schemes = &preferences.touch_keyboard_schemes;
-            // 用户改了启用列表时 Android 可能清掉 `selected`，所以启用了「注音 9 键」而没有选中项时也算。
-            let zhuyin_nine_key = schemes.selected == Some(TouchKeyboardScheme::ZhuyinNineKey)
-                || (schemes.selected.is_none()
-                    && schemes
-                        .enabled
-                        .contains(&TouchKeyboardScheme::ZhuyinNineKey));
-            zhuyin_nine_key.then_some(KeyGrid::NineKey)
-        }
-        _ => None,
-    }
-}

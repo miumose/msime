@@ -68,32 +68,11 @@ public:
   }
 
   void update(const std::vector<int> &shown, const std::array<std::string, 7> &states) {
+    (void)shown;
+    (void)states;
     buttons.clear();
     width = height = 0;
-    if (!active()) return;
-    nlohmann::json requests = nlohmann::json::array();
-    for (int id : shown) if (id >= 0 && id < 7) requests.push_back({keys_[id], states[id]});
-    const auto request = nlohmann::json{{"toolbar", manifest_}, {"shown", requests}}.dump();
-    auto owned = host_api::own_string(msime_client_skin_toolbar_image_layout(
-        reinterpret_cast<const uint8_t *>(request.data()), request.size()));
-    if (!owned) return;
-    const auto envelope = nlohmann::json::parse(owned.get(), nullptr, false);
-    if (envelope.is_discarded() || !envelope.value("ok", false)) return;
-    const auto &layout = envelope.at("value");
-    width = layout.at("widthDip").get<double>();
-    height = layout.at("heightDip").get<double>();
-    for (const auto &slot : layout.at("buttons")) {
-      const auto key = slot.at("key").get<std::string>();
-      const auto found = std::find(keys_.begin(), keys_.end(), key);
-      if (found == keys_.end()) continue;
-      const double x = slot.at("xDip").get<double>(), y = slot.at("yDip").get<double>();
-      const auto path = [&](const char *name) {
-        return slot.at(name).is_string() ? slot.at(name).get<std::string>() : std::string();
-      };
-      buttons.push_back({static_cast<int>(found - keys_.begin()),
-        {x, y, x + slot.at("widthDip").get<double>(), y + slot.at("heightDip").get<double>()},
-        slot.at("iconSizeDip").get<double>(), path("background"), path("image")});
-    }
+    // 皮肤工具栏已移除：不再向共享层请求图片布局。
   }
 
   std::optional<size_t> button_at(double x, double y) const {

@@ -1,5 +1,5 @@
 #pragma once
-#include <Windows.h>
+#include <windows.h>
 
 /**
  * High-precision performance timer using QueryPerformanceCounter.

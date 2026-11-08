@@ -94,42 +94,6 @@ impl CandidateScorer for ContextRecorder {
     }
 }
 
-/// 每次上屏和宿主送来上文之后，挂着的打分器都拿到此后排序所依据的全部上文，好在下一次按键之前把它编码好；失焦清空上文时不通知。
-#[test]
-fn the_scorer_hears_each_new_context_after_a_commit() {
-    let directory = tempfile::tempdir().unwrap();
-    let options = real_engine_options(directory.path());
-    let database = std::path::Path::new(&options.dictionaries).join("msime-pinyin.db");
-    rusqlite::Connection::open(database)
-        .unwrap()
-        .execute_batch(
-            "CREATE TABLE tbl_1_t(key TEXT,jp TEXT,value TEXT,weight INTEGER);
-             INSERT INTO tbl_1_t VALUES('ta','t','他',1000);",
-        )
-        .unwrap();
-    let mut runtime = Runtime::new(msime_engine::host::Session::new(&options).unwrap(), 9).unwrap();
-    runtime.focus(true).unwrap();
-    let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    runtime.set_candidate_scorer(Some(Box::new(ContextRecorder(std::sync::Arc::clone(
-        &heard,
-    )))));
-
-    runtime.seed_context("我们");
-    for value in b"ta" {
-        runtime
-            .dispatch(Action::Character {
-                value: *value,
-                shift: false,
-            })
-            .unwrap();
-    }
-    let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(committed.commit.as_deref(), Some("他"));
-    runtime.focus(false).unwrap();
-
-    assert_eq!(*heard.lock().unwrap(), ["我们", "我们他"]);
-}
-
 /// 给每个候选同样的分，逐键重排不动；`supersedes` 是它报的 `supersedes_settled_rerank`。
 struct Even {
     supersedes: bool,

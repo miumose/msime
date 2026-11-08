@@ -216,10 +216,6 @@ impl InputSession {
             session_id: self.online_requests.session_id,
             ..OnlineQuery::default()
         };
-        if request.scheme == SchemeType::JapaneseRomaji {
-            query.cloud_eligible = true;
-            return Some(query);
-        }
         if query.query_text.is_empty() {
             return None;
         }
@@ -424,15 +420,6 @@ impl InputSession {
         {
             return None;
         }
-        if request.scheme == SchemeType::JapaneseRomaji {
-            return (query.cloud_eligible
-                && !query.ai_eligible
-                && query.pinyin_segments.is_empty())
-            .then_some(OnlineAnswerState {
-                cloud_eligible: true,
-                ai_eligible: false,
-            });
-        }
         let segmentation = if request.normalized_segmentation.is_empty() {
             state.query_text.as_ref()
         } else {
@@ -453,22 +440,6 @@ impl InputSession {
         let request = self.engine.request();
         let mut state = CloudQueryState::default();
         match self.engine.current_scheme_type() {
-            SchemeType::JapaneseRomaji => {
-                state.cache_key = Cow::Borrowed(&request.raw_input);
-                state.should_query = !request.raw_input.is_empty();
-                if state.should_query {
-                    state.query_text = Cow::Borrowed(&request.raw_input);
-                }
-            }
-            // 韩文音节、越南文单词和藏文音节串本身就是文字，没有可交给云端转换的东西。粤拼、注音和笔画只由各自的词库回答。
-            SchemeType::Korean
-            | SchemeType::Cantonese
-            | SchemeType::Zhuyin
-            | SchemeType::Vietnamese
-            | SchemeType::Tibetan
-            | SchemeType::Stroke => {}
-            // Wubi codes are not spellings a cloud provider understands, and wubi providers cannot take dynamic rows.
-            SchemeType::Wubi => state.cache_key = Cow::Borrowed(&request.normalized_input),
             SchemeType::Shuangpin => {
                 let profile = self.shuangpin_profile();
                 let base = resolve_shuangpin_composition_base(request, profile);

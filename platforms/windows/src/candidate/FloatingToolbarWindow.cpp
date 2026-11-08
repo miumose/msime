@@ -12,7 +12,6 @@
 #include "ToolbarTooltips.h"
 #include "ServerResources.h"
 #include "WindowShadow.h"
-#include "WaveOverlayUtils.h"
 #include "IconFont.h"
 #include <algorithm>
 #include <cmath>
@@ -137,11 +136,8 @@ ToolbarMenuAnchor FloatingToolbarWindow::menu_anchor(std::optional<size_t> index
   RECT window{};
   GetWindowRect(window_, &window);
   RECT physical = window;
-  {
-    WaveOverlayDpiScope dpi_scope;
-    if (!GetWindowRect(window_, &physical))
-      physical = window;
-  }
+  if (!GetWindowRect(window_, &physical))
+    physical = window;
   const double unit = toolbar_pixel_unit(msime::windows::compat::window_dpi(window_), scale_);
   const auto card = image_.active() ? ToolbarRect{0, 0, image_.width, image_.height} : toolbar_card(slots().size(), metrics());
   double centre = static_cast<double>(x);
@@ -280,7 +276,6 @@ void FloatingToolbarWindow::run(size_t position, const ModePresentation &value, 
     settings_action_();
   else if (slot == kToolbarHandwriting && handwriting_action_)
     handwriting_action_();
-    voice_action_();
   else if (slot == kToolbarInputScheme && input_scheme_action_)
     input_scheme_action_(menu_anchor(position, x));
   else if (slot == 10 && hide_action_)

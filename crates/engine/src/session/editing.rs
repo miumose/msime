@@ -7,34 +7,15 @@ use crate::shuangpin::query::{
     detect_active_double_helpcode_length, segment_raw_boundaries,
     trim_trailing_letters_preserve_delimiters,
 };
-use crate::stroke;
 use crate::types::{Command, KeyResult, LocalInputMode, SchemeType};
 
-pub(super) fn temporary_japanese_preedit(raw: &str) -> String {
-    let mut preedit = String::with_capacity(1 + raw.len());
-    preedit.push('R');
-    preedit.push_str(raw);
-    preedit
-}
-
 impl InputSession {
-    /// 专用英文的预编辑；临时日文是 `"R"` 加带大小写的原文；本地模式的预编辑；越南文和藏文是显示出来的文字；粤拼是按音节加空格的字母；其余是带大小写的原文，笔画里就是键入的 `hspnzx` 字母，与 reading 画出的笔画字形一一对应。
+    /// 专用英文的预编辑；本地模式的预编辑；其余是带大小写的原文。
     pub(super) fn editing_text(&self) -> String {
         if self.dedicated_english {
             return self.dedicated_english_preedit.clone();
         }
         match self.local_mode {
-            LocalInputMode::TemporaryJapanese => {
-                temporary_japanese_preedit(&self.engine.request().raw_input_with_cases)
-            }
-            // A Vietnamese word is edited as the text it shows, not as its keystrokes.
-            LocalInputMode::None if self.is_vietnamese() => self.engine.preedit().to_owned(),
-            // 藏文音节串同样按显示出来的藏文编辑，而不是按威利按键。
-            LocalInputMode::None if self.is_tibetan() => self.engine.preedit().to_owned(),
-            // Jyutping is edited as the syllables it shows (`nei hou`); an edit drops the spaces again, because the scheme keeps only letters and `'`.
-            LocalInputMode::None if self.is_cantonese() => {
-                self.engine.request().normalized_segmentation.clone()
-            }
             LocalInputMode::None => self.raw_with_cases().to_owned(),
             _ => self.local_preedit.clone(),
         }
@@ -45,15 +26,6 @@ impl InputSession {
             return self.dedicated_english_preedit.len();
         }
         match self.local_mode {
-            LocalInputMode::TemporaryJapanese => {
-                1 + self.engine.request().raw_input_with_cases.len()
-            }
-            LocalInputMode::None if self.is_vietnamese() || self.is_tibetan() => {
-                self.engine.preedit().len()
-            }
-            LocalInputMode::None if self.is_cantonese() => {
-                self.engine.request().normalized_segmentation.len()
-            }
             LocalInputMode::None => self.raw_with_cases().len(),
             _ => self.local_preedit.len(),
         }
@@ -139,25 +111,10 @@ impl InputSession {
                         || (value == b'+' && caret == 1 && !text.contains('+'));
                 }
                 LocalInputMode::QuickPhrase | LocalInputMode::DateTime => accepted = lower,
-                // 笔画只接受笔画键；通配符不能插在最前面；已满 `MAX_STROKES` 笔时不再插入（否则截断会丢掉末尾那一笔）。组合中的其他字母被吞掉，与在末尾键入时一样。
-                LocalInputMode::None if self.stroke_rules_apply() => {
-                    if !stroke::is_key(value)
-                        || (value == stroke::WILDCARD && caret == 0)
-                        || text.len() >= stroke::MAX_STROKES
-                    {
-                        return if value.is_ascii_alphabetic() {
-                            KeyResult::handled()
-                        } else {
-                            KeyResult::unhandled()
-                        };
-                    }
-                    accepted = true;
-                }
                 LocalInputMode::None => {
                     let scheme = self.scheme();
                     accepted = lower
-                        || (upper && matches!(scheme, SchemeType::Quanpin | SchemeType::Shuangpin))
-                        || (value == b'-' && scheme == SchemeType::JapaneseRomaji);
+                        || (upper && matches!(scheme, SchemeType::Quanpin | SchemeType::Shuangpin));
                     if value == b';'
                         && scheme == SchemeType::Shuangpin
                         && self.profile.uses_semicolon_key()
@@ -197,12 +154,11 @@ impl InputSession {
                 LocalInputMode::Emoji | LocalInputMode::Kaomoji => {
                     accepted = accepted || value == b'\'';
                 }
-                LocalInputMode::TemporaryJapanese => {
-                    accepted = accepted || matches!(value, b'\'' | b'-');
-                }
                 // 与 `handle_local_character` 同一组规则：符号模式只收字母。
                 LocalInputMode::Symbol => accepted = value.is_ascii_alphabetic(),
-                LocalInputMode::SuperJianpin | LocalInputMode::TemporaryEnglish => {}
+                LocalInputMode::SuperJianpin
+                | LocalInputMode::TemporaryEnglish
+                | LocalInputMode::TemporaryJapanese => {}
                 LocalInputMode::Expression => {
                     accepted = text.len() < GENERATED_MODE_INPUT_LIMIT
                         && (self.expression_takes_unit_letter(value, caret)
@@ -248,7 +204,6 @@ impl InputSession {
                 self.local_mode,
                 LocalInputMode::None
                     | LocalInputMode::TemporaryEnglish
-                    | LocalInputMode::TemporaryJapanese
                     | LocalInputMode::Url
             ) {
                 // 普通快捷模式与末尾输入一致：先上屏原文，再交还拒绝键，避免被 runtime 当成选词。
@@ -276,23 +231,13 @@ impl InputSession {
         if self.dedicated_english {
             self.dedicated_english_preedit = text.to_owned();
             self.update_dedicated_english_candidates();
-        } else if self.local_mode != LocalInputMode::None
-            && self.local_mode != LocalInputMode::TemporaryJapanese
-        {
+        } else if self.local_mode != LocalInputMode::None {
             self.local_preedit = text.to_owned();
             diagnostic = self.update_local_candidates();
         } else {
-            let payload = if self.local_mode == LocalInputMode::TemporaryJapanese {
-                &text[1..]
-            } else {
-                text
-            };
-            self.pending_sequence = Some(payload.to_ascii_lowercase());
-            self.pending_sequence_with_cases = Some(payload.to_owned());
+            self.pending_sequence = Some(text.to_ascii_lowercase());
+            self.pending_sequence_with_cases = Some(text.to_owned());
             self.apply_pending_sequence();
-            if self.local_mode == LocalInputMode::TemporaryJapanese {
-                self.refresh_temporary_japanese();
-            }
         }
         self.caret = Some(caret);
         // The edit may have moved the caret into or out of a complete prefix.
@@ -356,15 +301,6 @@ impl InputSession {
                 raw_with_cases,
                 self.pinyin_segmentation_with_cases().as_ref(),
             ),
-            // The Cantonese editing text is spaced, so raw offsets would not land on its syllables; the host edits it one character at a time. A stroke is one character, so Stroke has no units either.
-            SchemeType::Wubi
-            | SchemeType::JapaneseRomaji
-            | SchemeType::Korean
-            | SchemeType::Cantonese
-            | SchemeType::Zhuyin
-            | SchemeType::Vietnamese
-            | SchemeType::Tibetan
-            | SchemeType::Stroke => Vec::new(),
         }
     }
 

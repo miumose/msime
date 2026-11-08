@@ -1,5 +1,4 @@
 use super::*;
-use crate::community::resource::{CommunityResourceContent, SharedWord};
 use crate::dictionary::personal::{PersonalWordApplied, PersonalWordPage, PersonalWordRequest};
 use std::collections::BTreeMap;
 
@@ -896,71 +895,6 @@ fn collections_import_reads_text_formats_and_refuses_scel_text() {
     ));
     // 失败的导入不建集合。
     assert_eq!(fixture.store.load().unwrap().collections.len(), 5);
-}
-
-fn community(id: u128, revision: u32, codes: &[&str]) -> CommunityResource {
-    CommunityResource {
-        id: Uuid::from_u128(id),
-        kind: CommunityResourceKind::Dictionary,
-        name: "社区英文".into(),
-        description: String::new(),
-        author: "示例作者".into(),
-        content: CommunityResourceContent {
-            entries: codes
-                .iter()
-                .map(|code| SharedWord {
-                    kind: crate::cloud::dictionary::DictionaryKind::English,
-                    code: (*code).into(),
-                    word: code.to_uppercase(),
-                    weight: 10_000,
-                })
-                .collect(),
-            ..Default::default()
-        },
-        revision,
-        saves: 0,
-        saved: false,
-        owned: false,
-        rating_count: 0,
-        rating_average: 0.0,
-        my_rating: 0,
-        moderation: None,
-    }
-}
-
-#[test]
-fn collections_community_dictionaries_install_and_update_in_place() {
-    let mut fixture = Fixture::new();
-    let view = fixture
-        .store
-        .install_community(&community(7, 1, &["alpha", "beta"]))
-        .unwrap();
-    assert_eq!(
-        view.collections[0].source,
-        CollectionSource::Community {
-            resource_id: Uuid::from_u128(7),
-            revision: 1
-        }
-    );
-    fixture.drain();
-    assert!(fixture.has(&english("alpha")) && fixture.has(&english("beta")));
-
-    let view = fixture
-        .store
-        .install_community(&community(7, 2, &["beta", "gamma"]))
-        .unwrap();
-    assert_eq!(view.collections.len(), 1);
-    assert_eq!(view.collections[0].entry_count, 2);
-    fixture.drain();
-    assert!(!fixture.has(&english("alpha")));
-    assert!(fixture.has(&english("beta")) && fixture.has(&english("gamma")));
-
-    let mut reply = community(8, 1, &["alpha"]);
-    reply.kind = CommunityResourceKind::Reply;
-    assert!(matches!(
-        fixture.store.install_community(&reply),
-        Err(DictionaryCollectionsError::Invalid)
-    ));
 }
 
 #[test]

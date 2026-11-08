@@ -1,5 +1,5 @@
 #include "DisplayAttribute.h"
-#include <Windows.h>
+#include <windows.h>
 #include <msctf.h>
 
 ITfDisplayAttributeMgr *g_pdam = NULL;

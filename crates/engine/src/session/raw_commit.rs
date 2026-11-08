@@ -20,9 +20,8 @@ impl Session {
         KeyResult::committed(raw)
     }
 
-    /// `learn_typed_spellings_on_enter` 打开时的 `CommitRaw`：专用英文、本地模式里原样上屏的字母，以及中文方案里拼不成完整音节的拼音，上屏之后学成英文词（bridge.cpp:1332-1359）。九宫格（九键、14 键）组字时上屏的不是用户逐个打出的字母：九键是数字，14 键是结束组字后的首选，都不学。专用英文里的词组字自己已经学过，这里再学一次是空操作（已有的词不再插入）。
+    /// `learn_typed_spellings_on_enter` 打开时的 `CommitRaw`：专用英文、本地模式里原样上屏的字母，以及中文方案里拼不成完整音节的拼音，上屏之后学成英文词（bridge.cpp:1332-1359）。专用英文里的词组字自己已经学过，这里再学一次是空操作（已有的词不再插入）。
     pub(super) fn commit_raw_learning_typed_spellings(&mut self) -> KeyResult {
-        let grid_composing = self.grid_composing();
         let before = self.snapshot();
         let chinese_scheme = before.scheme.learns_english_words();
         let complete_pure_pinyin = chinese_scheme && {
@@ -38,7 +37,6 @@ impl Session {
         let should_learn = self.input.glide_candidates.is_none()
             && self.input.learn_english_on_enter
             && before.conversion.is_empty()
-            && !grid_composing
             && !before.local_mode.generates_text()
             && before.local_mode != LocalInputMode::Url
             && (before.dedicated_english

@@ -1,7 +1,6 @@
 #pragma once
 #include "CandidateAction.h"
 #include "NavigationPolicy.h"
-#include "TypingEffectPolicy.h"
 #include "WordCharacterPolicy.h"
 #include "windows_ipc.h"
 #include <nlohmann/json.hpp>
@@ -84,25 +83,9 @@ public:
   nlohmann::json candidate_action(uint64_t epoch, uint64_t generation,
                                   size_t index, CandidateAction action,
                                   uint8_t position = 0);
-  std::optional<std::string> online_query(uint64_t epoch);
-  std::optional<std::string> ai_request(uint64_t epoch,
-                                        const std::string &query);
   /// Re-rank with the settled model; the refreshed view, or nothing when the
   /// order did not move or no settled model is installed.
   std::optional<nlohmann::json> rerank_settled(uint64_t epoch);
-  std::optional<nlohmann::json>
-  apply_cloud_response(uint64_t epoch, const std::string &query,
-                       const std::string &body);
-  std::optional<nlohmann::json> apply_ai_candidates(uint64_t epoch,
-                                                    const std::string &query,
-                                                    const std::string &candidates);
-  /// AI 回答为空、失败或被拒时告诉 Host API。共享内核已经不放 AI 占位行，这个调用答 applied:false、不改候选列表；调用和接口留着不变；视图没变时为空。
-  std::optional<nlohmann::json> resolve_ai_candidates(uint64_t epoch,
-                                                      const std::string &query);
-  std::optional<std::string> translation_query(uint64_t epoch);
-  std::optional<nlohmann::json>
-  apply_translations(uint64_t epoch, uint64_t generation,
-                     const std::string &translations);
   nlohmann::json update_preferences(uint64_t epoch,
                                     const std::string &snapshot);
   bool traditional_output() const {
@@ -113,9 +96,10 @@ public:
                                 uint64_t generation, bool previous,
                                 unsigned steps);
   nlohmann::json view() const;
-  // 一次物理按下（msime_client_key，lifecycle_key 或 lifecycle_passthrough_key 的值）：会话开着 FEEDBACK，按键音由共享库按会话的偏好排进播放队列，返回这个键的打字特效（位布局同 msime_client_typing_effect），候选窗据此画闪光和连击。不阻塞、不分配。只有 Server 调它：TSF DLL 把同一个库链进它加载到的每个进程，从不选择加入生命周期，也从不启动播放器。
+  // One physical key down. Without FEEDBACK the core only advances input; the
+  // Server no longer draws typing effects or plays key sounds.
   uint32_t key(uint32_t key);
-  // 交给核心的字段属性（server_field_traits 的值），和上次报的一样时不调 FFI。activate 和 set_input_enabled 在获得焦点之前另外原样再报一次（confirm_field_traits_before_focus），调用方要先用它报好此刻的属性。属性决定声音、特效和背景音乐：SECURE 什么都不出、音乐关掉，FULLSCREEN 声音静音、特效照画。
+  // 交给核心的字段属性（server_field_traits 的值），和上次报的一样时不调 FFI。activate 和 set_input_enabled 在获得焦点之前另外原样再报一次（confirm_field_traits_before_focus），调用方要先用它报好此刻的属性。
   void set_field_traits(uint32_t traits);
   uint32_t field_traits() const {
     check_thread();
@@ -124,19 +108,7 @@ public:
   // TIP 已经从自己的宿主会话把文字写进文档的那一次派发前后开关 COMMIT_OBSERVE_ONLY（msime_client_set_lifecycle）：这些上屏只能观察、不能改写。只设标志，不会抛出。平时经 CommitObserveOnly 开关。
   void set_commit_observe_only(bool observe_only) noexcept;
   bool commit_observe_only() const noexcept { return commit_observe_only_; }
-  // 一个键或一次上屏的打字特效（msime_client_typing_effect）：候选窗要画的连击数、升档位和特效样式打包在一起，特效和连击都关着时为 0。会话开着 FEEDBACK 时事件 0-4 由核心产生，这里只剩事件 5（绕过按键音的删除）还有意义。
-  uint32_t typing_effect(uint32_t event);
-  // The resolved typing effect (msime_client_typing_effect_settings) as Windows draws it: read when the session gains the focus and after each preference update, never per key, so the packed word the key path publishes is ready.
-  const TypingEffectSettings &typing_effect_settings() const {
-    check_thread();
-    return typing_effect_settings_;
-  }
-  // 同一份设置里特效包的全部颜色和火花数，光标处的火花用它；和设置一起读，按键路径只发布。
-  const TypingEffectPalette &typing_effect_palette() const {
-    check_thread();
-    return typing_effect_palette_;
-  }
-  // 输入法在这个客户端上激活或停用（msime_client_set_active）：激活的会话成为背景音乐的所有者，实际放不放还要看字段属性。记下来，偏好更新后再说一次；会话销毁时核心自己关掉它放的音乐。
+  // 输入法在这个客户端上激活或停用（msime_client_set_active）：记下来，偏好更新后再说一次。
   void set_active(bool active);
 
 private:
@@ -162,9 +134,6 @@ private:
   bool lifecycle_active_ = false;
   uint32_t field_traits_ = 0;
   bool commit_observe_only_ = false;
-  TypingEffectSettings typing_effect_settings_{};
-  TypingEffectPalette typing_effect_palette_{};
-  void refresh_typing_effect_settings();
   // 每次 msime_client_focus(true) 之前调用：把 field_traits_ 原样再报一次，不去重。
   void confirm_field_traits_before_focus();
 };

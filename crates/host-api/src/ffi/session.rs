@@ -68,12 +68,6 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
         .language_dictionaries
         .as_deref()
         .map(std::path::PathBuf::from);
-    let plugin_roots = key_sound::PluginRoots::new(
-        options.preferences_directory.as_deref(),
-        options.sound_packs.as_deref(),
-        options.plugin_packs.as_deref(),
-        &options.resources,
-    );
     let edition = options.edition();
     let quick_phrase_candidates_requested = options.quick_phrase_candidates.unwrap_or(false);
     let korean_romaja_requested = options.korean_romaja.unwrap_or(false);
@@ -86,21 +80,7 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
         // 回车学英文词与学习开关分开，学的词写进代次里的 `msime-english.db`：只读布局下那就是随包资源，学一次资源校验就再也过不去（resource length or digest mismatch）。
         options.learn_english_on_enter = false;
     }
-    let plugin_tables = plugin_tables::PluginTables::stamp(
-        plugin_roots.installed.as_deref(),
-        plugin_roots.builtin_packs.as_deref(),
-        &options,
-        &applied.plugins,
-    );
-    plugin_tables.fill(
-        &plugin_tables::PluginTables::default(),
-        plugin_roots.installed.as_deref(),
-        &mut options,
-    );
-    let sound = key_sound::SessionSound::new(key_sound::SoundSettings::new(
-        &applied.plugins,
-        &plugin_roots,
-    ));
+    let sound = key_sound::SessionSound::new(key_sound::SoundSettings::new(&applied.plugins));
     // 只读宿主的只读布局读的是随包资源，没有谁会改它，不取租约。
     let dictionary_access = if read_only_state && options.dictionaries == options.resources {
         None
@@ -123,9 +103,9 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
     let generation_lease = state_root.as_deref().and_then(|state| {
         let resources = std::path::Path::new(&options.resources);
         if read_only_state {
-            msime_client_providers::dictionary_updates::lease_read_only(state, resources)
+            crate::dictionary_updates::lease_read_only(state, resources)
         } else {
-            msime_client_providers::dictionary_updates::lease(state, resources)
+            crate::dictionary_updates::lease(state, resources)
         }
     });
     let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
@@ -134,17 +114,10 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
         .as_deref()
         .filter(|_| usage == SessionUse::Input && !read_only_state)
     {
-        let _ = msime_client_providers::dictionary_updates::record_loaded(
+        let _ = crate::dictionary_updates::record_loaded(
             state,
             std::path::Path::new(&options.resources),
         );
-    }
-    // Gate on the scheme actually run, as `apply_pending` does, so a preferred scheme that fell back to Quanpin starts in the same mode a rebuild would give it.
-    let default_key_grid = layout_key_grid(SchemeType::from_u8(options.scheme), &applied);
-    if default_key_grid.is_some() {
-        engine
-            .set_key_grid(default_key_grid)
-            .map_err(|e| e.to_string())?;
     }
     // Places in `@` mode start off in every engine, so the session carries the preference over itself, as `apply_pending` does on a rebuild.
     engine
@@ -170,7 +143,6 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
     runtime
         .set_cloud_candidates_enabled(applied.cloud_candidates)
         .map_err(|e| e.to_string())?;
-    runtime.set_translation_scope_highlighted(crate::translation_scope_highlighted(&applied));
     runtime.set_phrase_preedit(phrase_preedit);
     runtime.set_backspace_reverts_selection(applied.backspace_reverts_selection);
     runtime.set_escape_keeps_selected_word(applied.escape_keeps_selected_word);
@@ -181,10 +153,6 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
     runtime.set_wubi_candidate_selection(applied.wubi_candidate_selection.clone());
     runtime.set_second_third_candidate(applied.second_third_candidate);
     runtime.set_punctuation_marks(msime_client_core::punctuation::punctuation_marks(&applied));
-    runtime.set_multilingual_output(
-        applied.traditional_chinese_output,
-        applied.traditional_chinese_variant,
-    );
     // 开关开着时逐键重排器在后台挂，挂好后由 `apply_pending` 在输入空闲时换上，见 `HostSession::keyboard_reranker_loading`；关着时照旧当场放开。
     let keyboard_reranker_loading = if keyboard_reranker_allowed
         && keyboard_reranker_enabled(&applied.sentence_association, edition)
@@ -193,7 +161,7 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
             &options.resources,
             options.helpcode_fallback_resources.as_deref(),
             recorded_rerank_models.as_deref(),
-            plugin_roots.builtin_sounds.as_deref(),
+            None,
             state_root.as_deref(),
             sentence_model_path.as_deref(),
             pause_rerank,
@@ -204,7 +172,7 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
             &options.resources,
             options.helpcode_fallback_resources.as_deref(),
             recorded_rerank_models.as_deref(),
-            plugin_roots.builtin_sounds.as_deref(),
+            None,
             state_root.as_deref(),
             sentence_model_path.as_deref(),
         ));
@@ -214,7 +182,7 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
         &options.resources,
         options.helpcode_fallback_resources.as_deref(),
         recorded_rerank_models.as_deref(),
-        plugin_roots.builtin_sounds.as_deref(),
+        None,
         state_root.as_deref(),
     );
 
@@ -267,18 +235,12 @@ pub(crate) fn create_session(bytes: &[u8], usage: SessionUse) -> Result<Value, S
                 english_mode: false,
                 caps_lock: false,
                 page_size_override: None,
-                key_grid_override: None,
                 statistics_private: false,
                 preview: usage == SessionUse::Preview,
                 statistics_recorded_elsewhere,
                 ai_credential: None,
                 ai_provider_cache,
-                pending_selections: Default::default(),
-                pending_efficiency: Default::default(),
-                statistics_enabled: None,
-                plugin_roots,
                 sound,
-                plugin_tables,
                 state_root,
                 recorded_language_dictionaries,
                 resources_pending: false,
@@ -307,43 +269,17 @@ pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char 
     response(|| focus_session(handle, focused))
 }
 
-/// 写出本进程攒着的打字统计上屏（`record` 的批次）和会话交出的选词位置（`flush_selections`）：`inline` 时在当前线程上写完再返回，否则交给后台线程。
-///
-/// 失焦和会话销毁都要写：移动宿主的键盘扩展和输入法进程可能在收起后被系统直接杀掉，桌面宿主停下不打字以后最后一批也要等到下一次上屏满间隔才写，设置页一直看不到。宿主另在统计工作线程上调 `flush` 时这里再写一次也只是空转。
-pub(crate) fn flush_typing_statistics(inline: bool) {
-    if inline {
-        msime_client_services::typing_statistics::flush_pending_commits();
-    } else {
-        msime_client_services::typing_statistics::flush_pending_commits_in_background();
-    }
-}
-
-/// 失焦时在当前线程上写统计。只有 Windows：它的失焦在服务进程的 IPC 线程上。macOS 的失焦在 IMK 主线程、Linux 的在 GLib 主循环、移动宿主的可能在 UI 线程上，而它们的 `record` 在别的线程上跑：在这里写会把整份读写和 fsync 放到主线程，还可能等统计线程手里那次写的 fsync，所以交给后台线程。
-const FLUSHES_TYPING_STATISTICS_INLINE_ON_FOCUS_OUT: bool = cfg!(target_os = "windows");
-
-/// 销毁会话时在当前线程上写统计。桌面宿主销毁会话不频繁，之后进程可能就退出了，后台线程来不及写完；移动宿主（Android 每换一个输入框就销毁重建一次会话，鸿蒙在 ArkTS 里同步销毁）的销毁在 UI 线程上，交给后台线程。
-pub(crate) const FLUSHES_TYPING_STATISTICS_INLINE_ON_DESTROY: bool = !cfg!(any(
-    target_os = "android",
-    target_env = "ohos",
-    target_os = "ios"
-));
-
 /// `msime_client_focus` 的本体。
 pub(crate) fn focus_session(handle: u64, focused: bool) -> Result<Value, String> {
     with_session(handle, |session| {
-        // 在换插件表之前采样：换表会刷新打开着的 `/` 列表，这也算这次 focus 的变化。
         let pending = session.lifecycle_begin(lifecycle::Call::Focus(focused));
-        // Focus-out is where a host's field ends, so selections counted in it are handed to the process's statistics batch here rather than waiting for a batch to fill, and `flush_typing_statistics` writes that batch right after. The same goes for the engine's delayed context learning: the iOS keyboard extension and the Android IME process can be killed without ever destroying their sessions, and the engine no longer writes that queue at process exit.
+        // 失焦是一个字段的结束：引擎延迟的上下文学习在这里写出，输入法进程可能再也不销毁会话。
         if !focused {
-            session.flush_selections();
-            flush_typing_statistics(FLUSHES_TYPING_STATISTICS_INLINE_ON_FOCUS_OUT);
             msime_engine::flush_personal_learning();
         } else {
-            session.refresh_plugin_tables();
             // 脚本插件：在本次 focus 的任何事件之前丢弃上一个字段的实例，授权文件或包变了就重读。
             session.lifecycle_focus_in();
             // 设置应用可能刚下载好日文、粤拼、注音、笔画的资源包或落定重排模型；Engine 重建和模型加载在随后的 `complete_transition` 里空闲时进行。
-            session.refresh_resource_packs();
             // The settings page may have imported the pack in use again, or removed it, since this session last looked.
             session.sound.restamp();
         }
@@ -360,17 +296,20 @@ pub(crate) fn focus_session(handle: u64, focused: bool) -> Result<Value, String>
 
 #[no_mangle]
 pub extern "C" fn msime_client_reset_cache(handle: u64) -> *mut c_char {
-    crate::plugin_tables::release_cached_tables();
     dispatch(handle, Action::ResetCache)
+}
+
+/// 返回会话当前的只读视图。
+#[no_mangle]
+pub extern "C" fn msime_client_view(handle: u64) -> *mut c_char {
+    response(|| with_session(handle, |session| serialized_runtime_view(session)))
 }
 
 /// Releases process-level model caches without requiring a live session handle. This is for host
 /// memory-pressure callbacks after an input session has already been destroyed.
 #[no_mangle]
 pub extern "C" fn msime_client_release_process_cache() {
-    release_japanese_dictionary_cache();
     release_idle_personal_models();
-    crate::plugin_tables::release_cached_tables();
     release_gloss_caches();
 }
 

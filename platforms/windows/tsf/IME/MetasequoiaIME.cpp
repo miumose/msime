@@ -16,7 +16,7 @@
 #include <namedpipeapi.h>
 #include <winnt.h>
 #include <winuser.h>
-#include <Windows.h>
+#include <windows.h>
 #include <shellapi.h>
 #include <algorithm>
 #include <atomic>

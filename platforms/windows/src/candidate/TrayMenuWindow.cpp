@@ -3,9 +3,9 @@
 #include "../../compat/WindowsDpi.h"
 #include "AccessibleWindow.h"
 #include "IconFont.h"
+#include "MonitorDpi.h"
 #include "TrayMenuAccessibility.h"
 #include "ServerResources.h"
-#include "WaveOverlayUtils.h"
 #include <bitset>
 #include <cmath>
 #include <stdexcept>

@@ -55,8 +55,6 @@ rusqlite.workspace = true
 [target.'cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", not(target_env = "ohos"))))'.dev-dependencies]
 
 [target.'cfg(windows)'.dependencies]
-# The clipboard read behind 从系统剪贴板同步 (`clipboard_history::windows_clipboard_text`): the same privacy-marker check the Tauri shell and the Server's capture use.
-msime-host-windows = { path = "../host-windows" }
 windows = { version = "0.62", features = ["Win32_Graphics_DirectWrite", "Win32_Graphics_Gdi", "Win32_Globalization"] }
 
 # Only linux_catalog uses rustix, and that module excludes OpenHarmony, which reports target_os = "linux" as well.

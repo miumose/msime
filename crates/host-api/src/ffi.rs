@@ -497,7 +497,6 @@ pub(crate) fn rerank_models_root(
     sound_packs: Option<&Path>,
     state_root: Option<&Path>,
 ) -> Option<PathBuf> {
-    use msime_client_providers::resource_packs::{self, ResourcePack};
     let bundled = bundle.filter(|path| !path.is_empty()).unwrap_or(resources);
     let holds_models = |root: &Path| {
         root.join(RERANK_MODEL_DIRECTORY).is_dir()
@@ -518,9 +517,8 @@ pub(crate) fn rerank_models_root(
     }
     #[cfg(target_os = "windows")]
     let _ = sound_packs;
-    let state_root = state_root?;
-    resource_packs::installed_file(state_root, ResourcePack::RerankModelSmall, "lm_step.ort")
-        .map(|_| resource_packs::root(state_root))
+    let _ = state_root;
+    None
 }
 
 /// 会话此刻会从哪里挂 ONNX 重排模型：宿主指明了模型目录（`models`，HostOptions 的 `rerank_models`）就是那里，否则按 [`rerank_models_root`] 找；没开 `onnx-rerank` 特性时总是 `None`。[`keyboard_reranker`] 按它挂，聚焦时与上次挂的比较，资源包刚装好或被移除时换掉逐键重排。
@@ -1051,41 +1049,20 @@ fn load_onnx_reranker(directory: &Path) -> Option<msime_onnx_rerank::OnnxScorer>
     .ok()
 }
 
-pub mod android_data;
 pub mod candidate_colors;
 pub mod candidates;
-pub mod google;
-#[cfg(not(target_os = "android"))]
-pub mod handwriting;
-pub mod harmony_settings;
 pub mod host;
 pub mod input;
-pub mod ios_settings;
 pub mod lifecycle;
-pub mod local_translation;
 pub mod session;
-pub mod session_store;
+pub(crate) mod settled;
 pub mod spacing;
-pub mod translation;
-pub mod user_words;
-#[cfg(windows)]
-pub mod windows_handwriting;
-#[cfg(windows)]
-
-#[cfg(test)]
-mod preference_schema_tests;
 
 // Every export has always been reachable at the crate root; the domain split
 // below is for readers, not for callers, so each module is flattened back out.
-pub use android_data::*;
 pub use candidate_colors::*;
 pub use candidates::*;
 pub use host::*;
 pub use input::*;
 pub use lifecycle::*;
-pub use local_translation::*;
 pub use session::*;
-pub use translation::*;
-pub use user_words::*;
-#[cfg(windows)]
-pub use windows_handwriting::*;

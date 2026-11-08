@@ -48,18 +48,6 @@ pub fn snapshot_json(session: &Session, page: Option<(usize, usize)>) -> Value {
         "shuangpin_profile".into(),
         Value::from(view.shuangpin_profile.as_str()),
     );
-    if view.answered_by_pinyin_fallback {
-        out.insert("answered_by_pinyin_fallback".into(), Value::from(true));
-    }
-    if view.wubi_unique_four_code {
-        out.insert("wubi_unique_four_code".into(), Value::from(true));
-    }
-    if !view.nine_key_spellings.is_empty() {
-        out.insert(
-            "nine_key_spellings".into(),
-            Value::from(view.nine_key_spellings.clone()),
-        );
-    }
     let boundaries = session.segment_raw_boundaries();
     if !boundaries.is_empty() {
         out.insert("segment_boundaries".into(), Value::from(boundaries));

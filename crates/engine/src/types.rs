@@ -96,27 +96,13 @@ impl CandidateSource {
     }
 }
 
-/// Input scheme. The ordinal is part of the online identity (`"<scheme>:<raw>"`) and of the host ABI.
+/// 输入方案。序号是宿主 ABI 的一部分；精简版只保留拼音方案。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum SchemeType {
     #[default]
     Quanpin = 0,
     Shuangpin = 1,
-    Wubi = 2,
-    JapaneseRomaji = 3,
-    /// 韩语两套式或罗马字布局：音节在预编辑中组合，稳定前缀逐步上屏；`Command::ConvertHanja` 打开当前音节的汉字候选。
-    Korean = 4,
-    /// Cantonese in toneless Jyutping read against `msime-cantonese.db`: candidates are Traditional as stored, a candidate covering the leading syllables commits at once and leaves the rest composing. Selections learn into the user journal under the pinyin learning switches (`cantonese::learning`), never into a main dictionary.
-    Cantonese = 5,
-    /// Zhuyin (bopomofo) on the Dachen layout read against `msime-zhuyin.db`: keys compose syllables that convert to Traditional text as typed, a list the user opens pins a span's text without committing, Enter or any key outside the layout commits the conversion, and nothing is learned.
-    Zhuyin = 6,
-    /// Vietnamese through Telex or VNI: the keystrokes compose into one word in the preedit, which any key outside the spelling commits; there are no candidates.
-    Vietnamese = 7,
-    /// 藏文，在拉丁键盘上按 EWTS（扩展威利转写）拼写：威利原文在组字里组成一个音节串，显示为转换出的藏文；空格带音节点上屏，`/` 带垂符上屏，回车只上屏藏文；没有候选。
-    Tibetan = 8,
-    /// Stroke (笔画) read against `msime-stroke.db`: the keys h s p n z type the five strokes 横竖撇点折 in writing order and x stands for any one stroke; the preedit draws the strokes, candidates are single characters whose stroke code starts with the typed strokes, and nothing is learned.
-    Stroke = 9,
 }
 
 impl SchemeType {
@@ -124,14 +110,6 @@ impl SchemeType {
         Some(match value {
             0 => Self::Quanpin,
             1 => Self::Shuangpin,
-            2 => Self::Wubi,
-            3 => Self::JapaneseRomaji,
-            4 => Self::Korean,
-            5 => Self::Cantonese,
-            6 => Self::Zhuyin,
-            7 => Self::Vietnamese,
-            8 => Self::Tibetan,
-            9 => Self::Stroke,
             _ => return None,
         })
     }
@@ -141,440 +119,132 @@ impl SchemeType {
         match self {
             Self::Quanpin => "quanpin",
             Self::Shuangpin => "shuangpin",
-            Self::Wubi => "wubi",
-            Self::JapaneseRomaji => "japanese",
-            Self::Korean => "korean",
-            Self::Cantonese => "cantonese",
-            Self::Zhuyin => "zhuyin",
-            Self::Vietnamese => "vietnamese",
-            Self::Tibetan => "tibetan",
-            Self::Stroke => "stroke",
         }
     }
 
     pub fn is_pinyin(self) -> bool {
-        matches!(self, Self::Quanpin | Self::Shuangpin)
+        true
     }
 
-    // ---- Scheme traits ----
-    //
-    // The one source of truth for what differs between schemes. Every predicate matches exhaustively, so a new scheme cannot compile until each trait is decided for it. The values for the existing schemes encode today's behaviour; input-runtime and host-api read them through `SchemeType::from_u8`.
-
-    /// A Chinese scheme: what 中文 returns to and what the Chinese statistics count.
     pub const fn is_chinese(self) -> bool {
-        match self {
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => true,
-            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese | Self::Tibetan => false,
-        }
+        true
     }
 
-    /// The scheme's own text is Traditional Chinese, so no script conversion is wanted.
     pub const fn outputs_traditional_natively(self) -> bool {
-        match self {
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan => false,
-            Self::Cantonese | Self::Stroke | Self::Zhuyin => true,
-        }
+        false
     }
 
-    /// The host's Simplified-to-Traditional conversion applies to the scheme's commits and preedit.
     pub const fn script_conversion_applies(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// The engine translates punctuation through the Chinese table. Korean writes half-width ASCII marks instead; Japanese goes through the table like the Chinese schemes.
     pub const fn uses_chinese_punctuation(self) -> bool {
-        match self {
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => true,
-            Self::Korean | Self::Vietnamese | Self::Tibetan => false,
-        }
+        true
     }
 
-    /// The host's smart punctuation (context-dependent marks) may run.
     pub const fn host_smart_punctuation(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Cantonese | Self::Stroke => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Commits are widened when the full-width switch is on.
     pub const fn widens_full_width(self) -> bool {
-        match self {
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => true,
-            Self::Korean | Self::Vietnamese | Self::Tibetan => false,
-        }
+        true
     }
 
-    /// English words and emoji or kaomoji may be mixed into the candidate list.
     pub const fn allows_english_emoji_mixing(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// 没有组字时，Shift+字母打开按拼音拼写查的本地模式（E、M、J、R）和计算模式 V；K、C、U、T、Y、S 和 `/`、`@` 由 `opens_table_modes` 判断（`InputSession::local_mode_for_entry`）。
     pub const fn opens_local_modes(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// 没有组字时，Shift+K 打开短语模式，`/` 和 `@` 打开指令和提及模式，Shift+C、U、T、Y、S 打开拆字、Unicode、日期时间、临时英文和符号模式；五笔也提供这些不经过方案拼写的入口。
     pub const fn opens_table_modes(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// 「只出单字」打开时，候选里去掉含汉字的词和整句，只留单个汉字。只用于选一个候选就上屏、剩下的拼写接着组字的方案；注音的候选列表是给组字里的一段改字，笔画本来只出单字。
     pub const fn filters_to_single_characters(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Cantonese => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// 组字中键入 `www.`、`http:` 等时进入网址模式。
     pub const fn detects_urls(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Selections adjust frequencies and store sentences in the main dictionary and journal.
     pub const fn learns_into_main_dictionary(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Letters committed raw that are not a complete spelling are learned as an English word.
     pub const fn learns_english_words(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// The engine raises cloud queries for the composition.
     pub const fn cloud_eligible(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji => true,
-            Self::Wubi
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Candidates may carry translation glosses. Korean's are the Hanja rows, glossed and translated like Chinese ones under their 훈음.
     pub const fn shows_glosses(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Korean => true,
-            Self::JapaneseRomaji
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Focus loss or a scheme switch commits the composition instead of discarding it.
     pub const fn commits_on_blur(self) -> bool {
-        match self {
-            Self::Korean | Self::Vietnamese | Self::Tibetan | Self::Zhuyin => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Cantonese
-            | Self::Stroke => false,
-        }
+        false
     }
 
-    /// A partial selection is held as phrase progress rather than committed at once.
     pub const fn holds_phrase_progress(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
-            Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// The candidate list may be reordered by the sentence model and the personal context.
     pub const fn reranks_with_sentence_model(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// The snapshot's `reading` carries the composed text (kana, Hangul, the Zhuyin conversion, the Stroke glyphs 一丨丿丶乛) for the host to draw.
     pub const fn draws_reading(self) -> bool {
-        match self {
-            Self::JapaneseRomaji | Self::Korean | Self::Zhuyin | Self::Stroke => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese => false,
-        }
+        false
     }
 
-    /// Candidates appear only in a list the user opens (`Command::ConvertHanja`: the Korean Hanja list, the Zhuyin list), and the list can be closed again.
     pub const fn has_openable_candidate_list(self) -> bool {
-        match self {
-            Self::Korean | Self::Zhuyin => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke => false,
-        }
+        false
     }
 
-    /// 第一次 Cancel 保留组字：关闭打开的候选列表，或把越南文、藏文的组字切回按键原文。第二次 Cancel 才丢弃它。
     pub const fn cancel_keeps_composition(self) -> bool {
-        match self {
-            Self::Korean | Self::Zhuyin | Self::Vietnamese | Self::Tibetan => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Cantonese
-            | Self::Stroke => false,
-        }
+        false
     }
 
-    /// Selecting any of the scheme's candidates finishes the composition. Native wubi rows also finish, which is decided per row because a mixed wubi list holds pinyin rows too.
     pub const fn selection_completes(self) -> bool {
-        match self {
-            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese | Self::Tibetan => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        false
     }
 
-    /// The candidate list reads the composition as pinyin, so selections advance and learn as pinyin.
     pub const fn follows_pinyin_candidates(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// An apostrophe typed inside the composition is a syllable boundary the scheme keeps.
     pub const fn accepts_apostrophe(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji | Self::Cantonese => true,
-            Self::Wubi
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Zhuyin
-            | Self::Stroke => false,
-        }
+        true
     }
 
-    /// The caret stays at the end of the composition.
     pub const fn locks_caret(self) -> bool {
-        match self {
-            Self::Korean | Self::Vietnamese | Self::Tibetan | Self::Zhuyin => true,
-            Self::Quanpin
-            | Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Cantonese
-            | Self::Stroke => false,
-        }
+        false
     }
 
-    /// Fuzzy pinyin rules apply.
     pub const fn supports_fuzzy(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 
-    /// Typo autocorrection applies and its outcomes are learned.
     pub const fn supports_autocorrect(self) -> bool {
-        match self {
-            Self::Quanpin => true,
-            Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        matches!(self, Self::Quanpin)
     }
 
-    /// 九键网格能拼出该方案的音节：全拼用拼音九宫格，注音用注音九键。
-    pub const fn nine_key(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Zhuyin => true,
-            Self::Shuangpin
-            | Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke => false,
-        }
-    }
-
-    /// The scheme has a helpcode switch and its candidates carry helpcode annotations.
     pub const fn helpcode(self) -> bool {
-        match self {
-            Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi
-            | Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Tibetan
-            | Self::Cantonese
-            | Self::Stroke
-            | Self::Zhuyin => false,
-        }
+        true
     }
 }
 
-/// 会话允许运行的方案集合，每个方案占 `SchemeType` 序号对应的那一位。缺省是 [`SchemeSet::ALL`]，即全部方案，行为与没有这个集合时完全相同。
-///
-/// 收窄后，`ProviderRegistry` 只为集合里的方案构造 provider（全拼在全拼或五笔任一在集合里时构造，五笔混拼要用它），切换到集合外的方案报 `INPUT_SCHEME_NOT_ENABLED`。临时日文切到的也是日文方案，所以要用临时日文，集合里就得有 `JapaneseRomaji`；没有时临时日文的触发键不会进入这个模式。
+/// 会话允许运行的方案集合，每个方案占 `SchemeType` 序号对应的那一位。缺省是 [`SchemeSet::ALL`]。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SchemeSet(u16);
 
 impl SchemeSet {
-    /// 序号最大的方案。加方案时改这里，`scheme_set_all_covers_every_scheme` 会在漏改时失败。
-    const LAST: SchemeType = SchemeType::Stroke;
+    const LAST: SchemeType = SchemeType::Shuangpin;
     /// 全部方案：序号 0 到 `Self::LAST` 的每一位。
     pub const ALL: Self = Self((1 << (Self::LAST as u16 + 1)) - 1);
     pub const EMPTY: Self = Self(0);
@@ -595,18 +265,14 @@ impl SchemeSet {
             .fold(Self::EMPTY, |set, scheme| set.with(*scheme))
     }
 
-    /// 集合里是否有读 `msime-pinyin.db` 的方案：全拼、双拼和五笔的候选、学习和用户词都在它里面（五笔混拼的拼音行也是）。没有这三个方案的集合（例如只有日文、越南文或藏文的版本）随包不带 `msime-pinyin.db`：代次里没有它的工作副本，用户词库只剩英文词。
+    /// 集合里是否有读 `msime-pinyin.db` 的方案。
     pub const fn reads_main_dictionary(self) -> bool {
-        self.contains(SchemeType::Quanpin)
-            || self.contains(SchemeType::Shuangpin)
-            || self.contains(SchemeType::Wubi)
+        self.contains(SchemeType::Quanpin) || self.contains(SchemeType::Shuangpin)
     }
 
-    /// 集合里是否有离不开 `msime-english.db` 的方案：全拼、双拼的英文混输、九键英文和回车学英文词，全拼、双拼、五笔的临时英文（Shift+Y）都读它，所以有这三个方案时准备代次要求资源目录里有它。其余方案（日文、韩语、越南语、藏文、粤语、注音、笔画）自己不读它，只有宿主打开专用英文（`Session::set_dedicated_english`）时才查英文补全、学回车上屏的词：这样的集合不要求它，资源目录里带了就照样复制进代次，没带时代次里没有它，专用英文只出键入的字母、回车不学词，个人词典的英文词也无处可存（编辑以 `NO_ENGLISH_DICTIONARY` 失败）。读 `msime-pinyin.db` 的集合（[`Self::reads_main_dictionary`]）一定要求它。
+    /// 集合里是否有离不开 `msime-english.db` 的方案。
     pub const fn requires_english_dictionary(self) -> bool {
-        self.contains(SchemeType::Quanpin)
-            || self.contains(SchemeType::Shuangpin)
-            || self.contains(SchemeType::Wubi)
+        self.contains(SchemeType::Quanpin) || self.contains(SchemeType::Shuangpin)
     }
 }
 
@@ -1073,17 +739,11 @@ pub struct QueryRequest {
     pub first_page_rows: FirstPageRows,
     /// Committed text the neural sentence models condition on.
     pub rescoring_context: String,
-    /// Korean only: the Hanja list of the composing syllable is open, so the request is answered with its Hanja.
-    pub korean_hanja: bool,
-    /// 五笔通配：码里确实有 `z`，provider 改用模式匹配而不是前缀范围扫描（见 [`WubiInputOptions::z_wildcard`]）。
-    pub wubi_z_wildcard: bool,
-    /// 五笔 14 键：`normalized_input` 每一位是一组字母的代表字母（`wubi::grid`），provider 展开成这几组字母的每种组合再查码表。
-    pub wubi_grid: bool,
-    /// 26 键双拼每个按键的触点，与 `raw_input` 逐字节对齐，没有触点的位置为 `None`。只要不是双拼、没有注册几何、一个触点都没有、输入里有 `'` 或句中辅助码生效，就必须是空 Vec 而不是全 `None`：桌面请求因此与没有这个字段时逐字节相同。
+    /// 26 键双拼每个按键的触点，与 `raw_input` 逐字节对齐，没有触点的位置为 `None`。
     pub key_touches: Vec<Option<crate::touch::KeyTouch>>,
     /// 触点所在的那份几何；`key_touches` 为空时为 `None`。
     pub key_geometry: Option<std::sync::Arc<crate::touch::KeyGeometry>>,
-    /// 按触点计价的参数。只有 Rust 侧（评测示例）能改，见 [`crate::host::Session::set_touch_tuning`]。
+    /// 按触点计价的参数。
     pub touch_tuning: crate::touch::TouchTuning,
     /// False means no query at all.
     pub valid: bool,
@@ -1748,168 +1408,6 @@ mod tests {
     type Row = (&'static str, fn(SchemeType) -> bool, [bool; 5]);
     type Named = (&'static str, fn(SchemeType) -> bool);
 
-    const SCHEMES: [SchemeType; 5] = [
-        SchemeType::Quanpin,
-        SchemeType::Shuangpin,
-        SchemeType::Wubi,
-        SchemeType::JapaneseRomaji,
-        SchemeType::Korean,
-    ];
-
-    // Each row lists Quanpin, Shuangpin, Wubi, Japanese and Korean; the values are the behaviour these schemes had before the checks became predicates.
-    #[test]
-    fn predicates_keep_the_behaviour_of_the_existing_schemes() {
-        let table: [Row; 26] = [
-            (
-                "is_chinese",
-                SchemeType::is_chinese,
-                [true, true, true, false, false],
-            ),
-            (
-                "outputs_traditional_natively",
-                SchemeType::outputs_traditional_natively,
-                [false; 5],
-            ),
-            (
-                "script_conversion_applies",
-                SchemeType::script_conversion_applies,
-                [true, true, true, false, false],
-            ),
-            (
-                "uses_chinese_punctuation",
-                SchemeType::uses_chinese_punctuation,
-                [true, true, true, true, false],
-            ),
-            (
-                "host_smart_punctuation",
-                SchemeType::host_smart_punctuation,
-                [true, true, true, false, false],
-            ),
-            (
-                "widens_full_width",
-                SchemeType::widens_full_width,
-                [true, true, true, true, false],
-            ),
-            (
-                "allows_english_emoji_mixing",
-                SchemeType::allows_english_emoji_mixing,
-                [true, true, false, false, false],
-            ),
-            (
-                "opens_local_modes",
-                SchemeType::opens_local_modes,
-                [true, true, false, false, false],
-            ),
-            (
-                "learns_into_main_dictionary",
-                SchemeType::learns_into_main_dictionary,
-                [true, true, true, false, false],
-            ),
-            (
-                "learns_english_words",
-                SchemeType::learns_english_words,
-                [true, true, false, false, false],
-            ),
-            (
-                "cloud_eligible",
-                SchemeType::cloud_eligible,
-                [true, true, false, true, false],
-            ),
-            (
-                "shows_glosses",
-                SchemeType::shows_glosses,
-                [true, true, true, false, true],
-            ),
-            (
-                "commits_on_blur",
-                SchemeType::commits_on_blur,
-                [false, false, false, false, true],
-            ),
-            (
-                "holds_phrase_progress",
-                SchemeType::holds_phrase_progress,
-                [true, true, true, true, false],
-            ),
-            (
-                "reranks_with_sentence_model",
-                SchemeType::reranks_with_sentence_model,
-                [true, true, false, false, false],
-            ),
-            (
-                "draws_reading",
-                SchemeType::draws_reading,
-                [false, false, false, true, true],
-            ),
-            (
-                "has_openable_candidate_list",
-                SchemeType::has_openable_candidate_list,
-                [false, false, false, false, true],
-            ),
-            (
-                "cancel_keeps_composition",
-                SchemeType::cancel_keeps_composition,
-                [false, false, false, false, true],
-            ),
-            (
-                "selection_completes",
-                SchemeType::selection_completes,
-                [false, false, false, true, true],
-            ),
-            (
-                "follows_pinyin_candidates",
-                SchemeType::follows_pinyin_candidates,
-                [true, true, false, false, false],
-            ),
-            (
-                "accepts_apostrophe",
-                SchemeType::accepts_apostrophe,
-                [true, true, false, true, false],
-            ),
-            (
-                "locks_caret",
-                SchemeType::locks_caret,
-                [false, false, false, false, true],
-            ),
-            (
-                "supports_fuzzy",
-                SchemeType::supports_fuzzy,
-                [true, true, false, false, false],
-            ),
-            (
-                "supports_autocorrect",
-                SchemeType::supports_autocorrect,
-                [true, false, false, false, false],
-            ),
-            (
-                "nine_key",
-                SchemeType::nine_key,
-                [true, false, false, false, false],
-            ),
-            (
-                "helpcode",
-                SchemeType::helpcode,
-                [true, true, false, false, false],
-            ),
-        ];
-        for (name, predicate, expected) in table {
-            for (scheme, want) in SCHEMES.into_iter().zip(expected) {
-                assert_eq!(predicate(scheme), want, "{name} for {scheme:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn only_the_chinese_typing_schemes_detect_urls() {
-        for code in 0..=9 {
-            let scheme = SchemeType::from_u8(code).expect("scheme code");
-            let expected = matches!(
-                scheme,
-                SchemeType::Quanpin | SchemeType::Shuangpin | SchemeType::Wubi
-            );
-            assert_eq!(scheme.detects_urls(), expected, "{scheme:?}");
-        }
-    }
-
     #[test]
     fn local_input_mode_names_round_trip() {
         use super::LocalInputMode;
@@ -1951,348 +1449,6 @@ mod tests {
         assert_eq!(LocalInputMode::from_name("unknown"), None);
     }
 
-    #[test]
-    fn existing_scheme_codes_are_unchanged() {
-        for (code, scheme) in SCHEMES.into_iter().enumerate() {
-            assert_eq!(scheme as u8, code as u8);
-            assert_eq!(SchemeType::from_u8(code as u8), Some(scheme));
-        }
-    }
-
-    #[test]
-    fn vietnamese_round_trips_through_code_seven() {
-        assert_eq!(SchemeType::Vietnamese as u8, 7);
-        assert_eq!(SchemeType::from_u8(7), Some(SchemeType::Vietnamese));
-        assert_eq!(SchemeType::Vietnamese.name(), "vietnamese");
-        assert!(!SchemeType::Vietnamese.is_pinyin());
-    }
-
-    #[test]
-    fn tibetan_round_trips_through_code_eight() {
-        assert_eq!(SchemeType::Tibetan as u8, 8);
-        assert_eq!(SchemeType::from_u8(8), Some(SchemeType::Tibetan));
-        assert_eq!(SchemeType::Tibetan.name(), "tibetan");
-        assert!(!SchemeType::Tibetan.is_pinyin());
-    }
-
-    #[test]
-    fn cantonese_round_trips_through_code_five() {
-        assert_eq!(SchemeType::Cantonese as u8, 5);
-        assert_eq!(SchemeType::from_u8(5), Some(SchemeType::Cantonese));
-        assert_eq!(SchemeType::Cantonese.name(), "cantonese");
-        assert!(!SchemeType::Cantonese.is_pinyin());
-    }
-
-    #[test]
-    fn zhuyin_round_trips_through_code_six() {
-        assert_eq!(SchemeType::Zhuyin as u8, 6);
-        assert_eq!(SchemeType::from_u8(6), Some(SchemeType::Zhuyin));
-        assert_eq!(SchemeType::Zhuyin.name(), "zhuyin");
-        assert!(!SchemeType::Zhuyin.is_pinyin());
-    }
-
-    #[test]
-    fn stroke_round_trips_through_code_nine() {
-        assert_eq!(SchemeType::Stroke as u8, 9);
-        assert_eq!(SchemeType::from_u8(9), Some(SchemeType::Stroke));
-        assert_eq!(SchemeType::Stroke.name(), "stroke");
-        assert!(!SchemeType::Stroke.is_pinyin());
-        assert_eq!(SchemeType::from_u8(10), None);
-    }
-
-    // 笔画逐项照抄粤拼的取值，只有两处不同：笔画没有音节，所以不接受 `'` 分隔；预编辑画的是笔画字形，所以和注音一样由 `reading` 带给宿主。
-    #[test]
-    fn stroke_predicates() {
-        let scheme = SchemeType::Stroke;
-        let on: [Named; 6] = [
-            ("is_chinese", SchemeType::is_chinese),
-            (
-                "outputs_traditional_natively",
-                SchemeType::outputs_traditional_natively,
-            ),
-            (
-                "uses_chinese_punctuation",
-                SchemeType::uses_chinese_punctuation,
-            ),
-            ("host_smart_punctuation", SchemeType::host_smart_punctuation),
-            ("widens_full_width", SchemeType::widens_full_width),
-            ("draws_reading", SchemeType::draws_reading),
-        ];
-        let off: [Named; 20] = [
-            (
-                "cancel_keeps_composition",
-                SchemeType::cancel_keeps_composition,
-            ),
-            (
-                "script_conversion_applies",
-                SchemeType::script_conversion_applies,
-            ),
-            (
-                "allows_english_emoji_mixing",
-                SchemeType::allows_english_emoji_mixing,
-            ),
-            ("opens_local_modes", SchemeType::opens_local_modes),
-            (
-                "learns_into_main_dictionary",
-                SchemeType::learns_into_main_dictionary,
-            ),
-            ("learns_english_words", SchemeType::learns_english_words),
-            ("cloud_eligible", SchemeType::cloud_eligible),
-            ("shows_glosses", SchemeType::shows_glosses),
-            ("commits_on_blur", SchemeType::commits_on_blur),
-            ("holds_phrase_progress", SchemeType::holds_phrase_progress),
-            (
-                "reranks_with_sentence_model",
-                SchemeType::reranks_with_sentence_model,
-            ),
-            (
-                "has_openable_candidate_list",
-                SchemeType::has_openable_candidate_list,
-            ),
-            ("selection_completes", SchemeType::selection_completes),
-            (
-                "follows_pinyin_candidates",
-                SchemeType::follows_pinyin_candidates,
-            ),
-            ("accepts_apostrophe", SchemeType::accepts_apostrophe),
-            ("locks_caret", SchemeType::locks_caret),
-            ("supports_fuzzy", SchemeType::supports_fuzzy),
-            ("supports_autocorrect", SchemeType::supports_autocorrect),
-            ("nine_key", SchemeType::nine_key),
-            ("helpcode", SchemeType::helpcode),
-        ];
-        for (name, predicate) in on {
-            assert!(predicate(scheme), "{name}");
-        }
-        for (name, predicate) in off {
-            assert!(!predicate(scheme), "{name}");
-        }
-        // 除上面两处外，每个谓词都与粤拼相同。
-        for (name, predicate) in on.into_iter().chain(off) {
-            if name == "accepts_apostrophe" || name == "draws_reading" {
-                assert_ne!(
-                    predicate(scheme),
-                    predicate(SchemeType::Cantonese),
-                    "{name}"
-                );
-            } else {
-                assert_eq!(
-                    predicate(scheme),
-                    predicate(SchemeType::Cantonese),
-                    "{name}"
-                );
-            }
-        }
-    }
-
-    // Zhuyin is a Chinese scheme writing Traditional text, with only its Shift overlay as Chinese punctuation; its converted text is the reading the host draws, the caret stays at the end, candidates appear only in the list the user opens, the conversion commits on blur, and it learns nothing. 注音九键也拼它的音节，所以 `nine_key` 为真。
-    #[test]
-    fn zhuyin_predicates() {
-        let scheme = SchemeType::Zhuyin;
-        let on: [Named; 10] = [
-            ("is_chinese", SchemeType::is_chinese),
-            (
-                "cancel_keeps_composition",
-                SchemeType::cancel_keeps_composition,
-            ),
-            (
-                "outputs_traditional_natively",
-                SchemeType::outputs_traditional_natively,
-            ),
-            (
-                "uses_chinese_punctuation",
-                SchemeType::uses_chinese_punctuation,
-            ),
-            ("widens_full_width", SchemeType::widens_full_width),
-            ("commits_on_blur", SchemeType::commits_on_blur),
-            ("draws_reading", SchemeType::draws_reading),
-            (
-                "has_openable_candidate_list",
-                SchemeType::has_openable_candidate_list,
-            ),
-            ("locks_caret", SchemeType::locks_caret),
-            ("nine_key", SchemeType::nine_key),
-        ];
-        let off: [Named; 16] = [
-            (
-                "script_conversion_applies",
-                SchemeType::script_conversion_applies,
-            ),
-            ("host_smart_punctuation", SchemeType::host_smart_punctuation),
-            (
-                "allows_english_emoji_mixing",
-                SchemeType::allows_english_emoji_mixing,
-            ),
-            ("opens_local_modes", SchemeType::opens_local_modes),
-            (
-                "learns_into_main_dictionary",
-                SchemeType::learns_into_main_dictionary,
-            ),
-            ("learns_english_words", SchemeType::learns_english_words),
-            ("cloud_eligible", SchemeType::cloud_eligible),
-            ("shows_glosses", SchemeType::shows_glosses),
-            ("holds_phrase_progress", SchemeType::holds_phrase_progress),
-            (
-                "reranks_with_sentence_model",
-                SchemeType::reranks_with_sentence_model,
-            ),
-            ("selection_completes", SchemeType::selection_completes),
-            (
-                "follows_pinyin_candidates",
-                SchemeType::follows_pinyin_candidates,
-            ),
-            ("accepts_apostrophe", SchemeType::accepts_apostrophe),
-            ("supports_fuzzy", SchemeType::supports_fuzzy),
-            ("supports_autocorrect", SchemeType::supports_autocorrect),
-            ("helpcode", SchemeType::helpcode),
-        ];
-        for (name, predicate) in on {
-            assert!(predicate(scheme), "{name}");
-        }
-        for (name, predicate) in off {
-            assert!(!predicate(scheme), "{name}");
-        }
-    }
-
-    // Cantonese is a Chinese scheme writing Traditional text as stored, with Chinese punctuation and `'` boundaries; it learns only into the journal's Cantonese rows (not `learns_into_main_dictionary`), holds no phrase progress and has none of the pinyin machinery.
-    #[test]
-    fn cantonese_predicates() {
-        let scheme = SchemeType::Cantonese;
-        let on: [Named; 6] = [
-            ("is_chinese", SchemeType::is_chinese),
-            (
-                "outputs_traditional_natively",
-                SchemeType::outputs_traditional_natively,
-            ),
-            (
-                "uses_chinese_punctuation",
-                SchemeType::uses_chinese_punctuation,
-            ),
-            ("host_smart_punctuation", SchemeType::host_smart_punctuation),
-            ("widens_full_width", SchemeType::widens_full_width),
-            ("accepts_apostrophe", SchemeType::accepts_apostrophe),
-        ];
-        let off: [Named; 20] = [
-            (
-                "cancel_keeps_composition",
-                SchemeType::cancel_keeps_composition,
-            ),
-            (
-                "script_conversion_applies",
-                SchemeType::script_conversion_applies,
-            ),
-            (
-                "allows_english_emoji_mixing",
-                SchemeType::allows_english_emoji_mixing,
-            ),
-            ("opens_local_modes", SchemeType::opens_local_modes),
-            (
-                "learns_into_main_dictionary",
-                SchemeType::learns_into_main_dictionary,
-            ),
-            ("learns_english_words", SchemeType::learns_english_words),
-            ("cloud_eligible", SchemeType::cloud_eligible),
-            ("shows_glosses", SchemeType::shows_glosses),
-            ("commits_on_blur", SchemeType::commits_on_blur),
-            ("holds_phrase_progress", SchemeType::holds_phrase_progress),
-            (
-                "reranks_with_sentence_model",
-                SchemeType::reranks_with_sentence_model,
-            ),
-            ("draws_reading", SchemeType::draws_reading),
-            (
-                "has_openable_candidate_list",
-                SchemeType::has_openable_candidate_list,
-            ),
-            ("selection_completes", SchemeType::selection_completes),
-            (
-                "follows_pinyin_candidates",
-                SchemeType::follows_pinyin_candidates,
-            ),
-            ("locks_caret", SchemeType::locks_caret),
-            ("supports_fuzzy", SchemeType::supports_fuzzy),
-            ("supports_autocorrect", SchemeType::supports_autocorrect),
-            ("nine_key", SchemeType::nine_key),
-            ("helpcode", SchemeType::helpcode),
-        ];
-        for (name, predicate) in on {
-            assert!(predicate(scheme), "{name}");
-        }
-        for (name, predicate) in off {
-            assert!(!predicate(scheme), "{name}");
-        }
-    }
-
-    // 越南文和藏文都在组字里拼出一个词（音节串），没有候选也不学习：失焦时上屏，光标停在末尾，第一次 Esc 显示原文，中文相关的特性全部关闭。
-    #[test]
-    fn vietnamese_and_tibetan_predicates() {
-        let on: [Named; 4] = [
-            (
-                "cancel_keeps_composition",
-                SchemeType::cancel_keeps_composition,
-            ),
-            ("commits_on_blur", SchemeType::commits_on_blur),
-            ("locks_caret", SchemeType::locks_caret),
-            ("selection_completes", SchemeType::selection_completes),
-        ];
-        let off: [Named; 22] = [
-            ("is_chinese", SchemeType::is_chinese),
-            (
-                "outputs_traditional_natively",
-                SchemeType::outputs_traditional_natively,
-            ),
-            (
-                "script_conversion_applies",
-                SchemeType::script_conversion_applies,
-            ),
-            (
-                "uses_chinese_punctuation",
-                SchemeType::uses_chinese_punctuation,
-            ),
-            ("host_smart_punctuation", SchemeType::host_smart_punctuation),
-            ("widens_full_width", SchemeType::widens_full_width),
-            (
-                "allows_english_emoji_mixing",
-                SchemeType::allows_english_emoji_mixing,
-            ),
-            ("opens_local_modes", SchemeType::opens_local_modes),
-            (
-                "learns_into_main_dictionary",
-                SchemeType::learns_into_main_dictionary,
-            ),
-            ("learns_english_words", SchemeType::learns_english_words),
-            ("cloud_eligible", SchemeType::cloud_eligible),
-            ("shows_glosses", SchemeType::shows_glosses),
-            ("holds_phrase_progress", SchemeType::holds_phrase_progress),
-            (
-                "reranks_with_sentence_model",
-                SchemeType::reranks_with_sentence_model,
-            ),
-            ("draws_reading", SchemeType::draws_reading),
-            (
-                "has_openable_candidate_list",
-                SchemeType::has_openable_candidate_list,
-            ),
-            (
-                "follows_pinyin_candidates",
-                SchemeType::follows_pinyin_candidates,
-            ),
-            ("accepts_apostrophe", SchemeType::accepts_apostrophe),
-            ("supports_fuzzy", SchemeType::supports_fuzzy),
-            ("supports_autocorrect", SchemeType::supports_autocorrect),
-            ("nine_key", SchemeType::nine_key),
-            ("helpcode", SchemeType::helpcode),
-        ];
-        for scheme in [SchemeType::Vietnamese, SchemeType::Tibetan] {
-            for (name, predicate) in on {
-                assert!(predicate(scheme), "{name} for {scheme:?}");
-            }
-            for (name, predicate) in off {
-                assert!(!predicate(scheme), "{name} for {scheme:?}");
-            }
-        }
-    }
-
     /// `SchemeSet::ALL` 正好是 `from_u8` 认得的全部方案：加了方案却没改 `SchemeSet::LAST` 时，新方案会落在 `ALL` 之外，full 版的会话就切不到它。
     #[test]
     fn scheme_set_all_covers_every_scheme() {
@@ -2308,61 +1464,6 @@ mod tests {
                 ),
             }
         }
-    }
-
-    #[test]
-    fn only_pinyin_and_wubi_read_the_main_dictionary() {
-        assert!(SchemeSet::ALL.reads_main_dictionary());
-        assert!(!SchemeSet::EMPTY.reads_main_dictionary());
-        for value in 0..=u8::MAX {
-            let Some(scheme) = SchemeType::from_u8(value) else {
-                continue;
-            };
-            let reads = matches!(
-                scheme,
-                SchemeType::Quanpin | SchemeType::Shuangpin | SchemeType::Wubi
-            );
-            assert_eq!(
-                SchemeSet::of(&[scheme]).reads_main_dictionary(),
-                reads,
-                "{scheme:?}"
-            );
-        }
-        assert!(!SchemeSet::of(&[
-            SchemeType::JapaneseRomaji,
-            SchemeType::Vietnamese,
-            SchemeType::Tibetan,
-        ])
-        .reads_main_dictionary());
-    }
-
-    /// 只有全拼、双拼、五笔离不开 `msime-english.db`；读主库的集合一定也要求它，准备代次时据此先查英文库再查主库。
-    #[test]
-    fn only_pinyin_and_wubi_require_the_english_dictionary() {
-        assert!(SchemeSet::ALL.requires_english_dictionary());
-        assert!(!SchemeSet::EMPTY.requires_english_dictionary());
-        for value in 0..=u8::MAX {
-            let Some(scheme) = SchemeType::from_u8(value) else {
-                continue;
-            };
-            let set = SchemeSet::of(&[scheme]);
-            let requires = matches!(
-                scheme,
-                SchemeType::Quanpin | SchemeType::Shuangpin | SchemeType::Wubi
-            );
-            assert_eq!(set.requires_english_dictionary(), requires, "{scheme:?}");
-            assert!(!set.reads_main_dictionary() || set.requires_english_dictionary());
-        }
-        assert!(!SchemeSet::of(&[
-            SchemeType::JapaneseRomaji,
-            SchemeType::Korean,
-            SchemeType::Vietnamese,
-            SchemeType::Tibetan,
-            SchemeType::Cantonese,
-            SchemeType::Zhuyin,
-            SchemeType::Stroke,
-        ])
-        .requires_english_dictionary());
     }
 
     #[test]

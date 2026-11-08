@@ -14,9 +14,9 @@ namespace msime::windows {
 static_assert(FanyImeFieldTraits::Secure == MSIME_TRAIT_SECURE);
 static_assert(FanyImeFieldTraits::Elevated == MSIME_TRAIT_ELEVATED);
 
-// 会话选择加入的位。按键音、上屏音、打字特效和背景音乐都由核心驱动（FEEDBACK）；部分选词由 Server 自己暂存在前缀里（HOST_HOLDS_PIECES）。`commit_observe_only` 只在 TIP 已经从自己的宿主会话把文字写进文档的那一次派发前后打开。`host_holds_pieces` 只在 Server 不暂存这次选中的一段、而是整段送进文档的那一次选词里关掉（ServerSession::select 里整段上屏的候选来源）。
+// 会话选择加入的位。精简版不再请求 FEEDBACK，因此按键音、上屏音、打字特效和背景音乐都不启动；`host_holds_pieces` 与 `commit_observe_only` 仍按核心约定传递。`commit_observe_only` 只在 TIP 已经从自己的宿主会话把文字写进文档的那一次派发前后打开。`host_holds_pieces` 只在 Server 不暂存这次选中的一段、而是整段送进文档的那一次选词里关掉（ServerSession::select 里整段上屏的候选来源）。
 constexpr uint32_t lifecycle_flags(bool commit_observe_only = false, bool host_holds_pieces = true) {
-  return MSIME_LIFECYCLE_FEEDBACK | (host_holds_pieces ? MSIME_LIFECYCLE_HOST_HOLDS_PIECES : 0u) |
+  return (host_holds_pieces ? MSIME_LIFECYCLE_HOST_HOLDS_PIECES : 0u) |
          (commit_observe_only ? MSIME_LIFECYCLE_COMMIT_OBSERVE_ONLY : 0u);
 }
 

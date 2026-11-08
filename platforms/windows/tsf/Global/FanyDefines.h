@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
-#include <Windows.h>
+#include <windows.h>
 
 namespace Global
 {

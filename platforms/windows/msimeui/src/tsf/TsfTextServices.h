@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Windows.h>
+#include <windows.h>
 #include <msctf.h>
 
 #ifndef TF_CLIENTID_NULL

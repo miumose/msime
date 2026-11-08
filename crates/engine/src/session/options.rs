@@ -1,4 +1,4 @@
-//! The public option and snapshot values of `Session` (`include/metasequoia/session.h`). Shared by the session, the nine-key session, the host facade and the golden harness.
+//! The public option and snapshot values of `Session` (`include/metasequoia/session.h`). Shared by the session, the host facade and the golden harness.
 
 use std::path::PathBuf;
 
@@ -9,10 +9,9 @@ use crate::types::{
     CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
     FuzzyPinyinOptions, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
     PluginCommand, QuickPhraseEntry, SchemeSet, SchemeType, SentenceAssociationOptions,
-    ShuangpinCustomTable, ShuangpinHelpcodeModes, ShuangpinProfileKind, TextConversion, WordItem,
-    WubiInputOptions, DEFAULT_FIRST_PAGE_ROWS,
+    ShuangpinCustomTable, ShuangpinHelpcodeModes, ShuangpinProfileKind, WordItem,
+    DEFAULT_FIRST_PAGE_ROWS,
 };
-use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
 
 /// Everything a session is built with. `learning_undo` is gone with the feature.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,24 +27,6 @@ pub struct SessionOptions {
     pub shuangpin_preedit_uses_raw: bool,
     /// 双拼预编辑显示原始按键（`shuangpin_preedit_uses_raw` 为真）时，按音节在按键之间插 `'`（自然码 `nimf` 显示为 `ni'mf`），不展开成全拼。`shuangpin_preedit_uses_raw` 为假时不读它。
     pub shuangpin_preedit_separated: bool,
-    /// How the Vietnamese scheme spells marks: Telex letters or VNI digits.
-    pub vietnamese_input_method: VietnameseInputMethod,
-    /// Where the Vietnamese scheme puts the tone on `oa`, `oe` and `uy`.
-    pub vietnamese_tone_style: VietnameseToneStyle,
-    /// 韩语实体键盘布局，缺省两套式。
-    pub korean_layout: crate::KoreanLayout,
-    /// Where `msime-cantonese.db` is; empty when the host has none. Read only when Cantonese is activated, which fails without it.
-    pub cantonese_dictionary: PathBuf,
-    /// 独立粤语双拼入口强制按两键码解释，普通粤拼入口仍按现有规则自动识别。
-    pub force_cantonese_shuangpin: bool,
-    /// 粤拼候选上屏前经过的转换；`None` 照词库原样输出（繁体）。宿主在用户选了粤拼输出简体时传入繁转简，转换后同一读音段里字面相同的候选只留第一条。
-    pub cantonese_output_conversion: Option<TextConversion>,
-    /// Where `msime-zhuyin.db` is; empty when the host has none. Read only when Zhuyin is activated, which fails without it.
-    pub zhuyin_dictionary: PathBuf,
-    /// Where `msime-stroke.db` is; empty when the host has none. Read only when Stroke is activated, which fails without it.
-    pub stroke_dictionary: PathBuf,
-    /// `msime-japanese.dat` 的位置；为空时读资源目录里的那份。文件缺失时日文只给假名行。
-    pub japanese_dictionary: PathBuf,
     pub helpcode_schema: String,
     /// 辅助码前导标点；None 保留现有 Shift 加字母。
     pub helpcode_trigger_key: Option<u8>,
@@ -62,8 +43,6 @@ pub struct SessionOptions {
     pub strict_quanpin_helpcode: bool,
     /// 双拼辅助码的触发方式（Windows `[helpcode]` 组的双拼专属键）；只在双拼方案下生效。
     pub shuangpin_helpcode_modes: ShuangpinHelpcodeModes,
-    /// 十四／十八键组码后可以放下分隔符输入辅助码（[`crate::Session::grid_helpcode`]），默认关；还要 `helpcode` 开着、码表非空。
-    pub grid_helpcode: bool,
     pub chinese_punctuation: bool,
     pub paired_punctuation: bool,
     /// 0 follows the mode, 1 forces Chinese, 2 forces ASCII.
@@ -90,12 +69,6 @@ pub struct SessionOptions {
     pub mixed_candidates: bool,
     pub english: EnglishInputOptions,
     pub expressive: MixedExpressiveOptions,
-    /// 日文混输（实验选项，默认关）：全拼、双拼组字时，整段输入像日文罗马字就混进一行日文转换（来源 `MixedJapanese`），见 `ImeSession::mixed_japanese_conversion`。需要会话带日文（`enabled_schemes` 含 `JapaneseRomaji`）和日文模型；开着时建会话就在后台预热模型。
-    pub japanese_mixing: bool,
-    /// 连续多语言输入所选的语言；默认空集合关闭，少于两种不生成混合行。
-    pub multilingual_languages: Vec<crate::multilingual::Language>,
-    pub wubi: WubiInputOptions,
-    /// Learn word sequences and pick pairs; also needs `learning`.
     pub personal_context: bool,
     /// 上屏后联想；独立于整句候选，默认关闭。
     pub next_word_prediction: bool,
@@ -131,15 +104,6 @@ impl SessionOptions {
             shuangpin_custom_profile: None,
             shuangpin_preedit_uses_raw: true,
             shuangpin_preedit_separated: false,
-            vietnamese_input_method: VietnameseInputMethod::Telex,
-            vietnamese_tone_style: VietnameseToneStyle::Modern,
-            korean_layout: crate::KoreanLayout::Dubeolsik,
-            cantonese_dictionary: PathBuf::new(),
-            force_cantonese_shuangpin: false,
-            cantonese_output_conversion: None,
-            zhuyin_dictionary: PathBuf::new(),
-            stroke_dictionary: PathBuf::new(),
-            japanese_dictionary: PathBuf::new(),
             helpcode_schema: "wubi86".to_owned(),
             helpcode_trigger_key: None,
             helpcode_table: None,
@@ -149,7 +113,6 @@ impl SessionOptions {
             helpcode: false,
             strict_quanpin_helpcode: false,
             shuangpin_helpcode_modes: ShuangpinHelpcodeModes::default(),
-            grid_helpcode: false,
             chinese_punctuation: true,
             paired_punctuation: true,
             punctuation_lock: 0,
@@ -167,9 +130,6 @@ impl SessionOptions {
             mixed_candidates: true,
             english: EnglishInputOptions::default(),
             expressive: MixedExpressiveOptions::default(),
-            japanese_mixing: false,
-            multilingual_languages: Vec::new(),
-            wubi: WubiInputOptions::default(),
             personal_context: true,
             next_word_prediction: false,
             sentence_association: SentenceAssociationOptions::default(),
@@ -213,26 +173,8 @@ pub struct SessionSnapshot {
     pub caret_position: usize,
     /// 前导键在等辅助码（还没输或只输了一位）时它在 `editing_text` 里的位置，否则为 `None`。显示快照的 `preedit` 已经把它紧挨着插在辅助码前面（`ni;`、全拼 `ni';F`），只插不删；`editing_text` 和光标不含它，前导键只在光标位于末尾时生效，所以光标总在它后面。
     pub helpcode_trigger: Option<HelpcodeTrigger>,
-    pub nine_key_spellings: Vec<String>,
-    /// 九键组字时的读音行：首选候选覆盖的数字显示成它的拼音，其余数字按 `preedit` 原样显示（`xi'an`、`yi'c`、`ni'hao'9`）；首选不是拼音候选时为空。只用于显示，`preedit` 仍是数字。
-    pub nine_key_reading: String,
-    /// 九宫格候选只留单字（`set_nine_key_filter`）。
-    pub nine_key_single_character: bool,
-    /// 九宫格候选按笔画筛选时所选的笔顺前缀（`hspnz`），否则为空。
-    pub nine_key_strokes: String,
-    /// 这次组字能用网格辅助码（[`crate::Session::grid_helpcode`]）：十四／十八键拼音组码、开关和码表都在。
-    pub grid_helpcode_available: bool,
-    /// 放下分隔符后宿主画在读音后面的辅助码，如 `|Q[ER]`；没有分隔符时为空。不进预编辑，不上屏。
-    pub grid_helpcode_display: String,
-    /// 至少有一槽辅助码、候选是筛过的：宿主和 runtime 不能再跨行重排。只有分隔符时为假。
-    pub grid_helpcode_constrained: bool,
-    /// The candidates came from the wubi mixed-pinyin fallback, not the wubi table.
-    pub answered_by_pinyin_fallback: bool,
-    pub wubi_unique_four_code: bool,
     pub shuangpin_profile: String,
     pub candidate_sources: Vec<CandidateSource>,
-    /// 当前唯一的连续混合行所携带的语言边界；没有该行时为空，不随普通候选重排而错位。
-    pub multilingual_conversion: Option<crate::multilingual::Conversion>,
     /// Helpcodes or correction hints.
     pub candidate_annotations: Vec<String>,
     /// Whether each candidate answers the whole key rather than a prefix of it or a completion past it.

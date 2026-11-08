@@ -8,7 +8,6 @@ use crate::error::Result;
 use crate::local::catalog::{self, EmojiCatalogItem, EmojiCatalogSlice, EmojiSymbolGroup};
 use crate::shuangpin::hints::ShuangpinKeyHint;
 use crate::types::ShuangpinProfileKind;
-use crate::wubi::lookup::WubiCodeLookup;
 
 /// Over the generation's working `msime-pinyin.db`.
 pub fn hanzi_to_pinyin(options: &EngineOptions, text: &str) -> String {
@@ -28,36 +27,12 @@ pub fn main_dictionary_path(options: &EngineOptions) -> PathBuf {
     runtime_paths(options).dictionary(assets::MAIN_DICTIONARY)
 }
 
-/// 五笔查码：`text` 里每个不同汉字（以及整段作为一个词）在 86、98 和新世纪码表里的编码，读会话所用的同一份五笔码表（`wubi_database` 选出的文件，含用户加的五笔词）。
-pub fn wubi_code_lookup(options: &EngineOptions, text: &str) -> WubiCodeLookup {
-    let database = crate::ime::registry::wubi_database(&runtime_paths(options));
-    // 下载的码表（`EngineOptions::wubi_dictionary`）要等下一次建会话才并进代次；代次里还缺下载的那份带着的表时，查码直接读下载的那份，查码本来就只读码表。
-    let database = if !options.wubi_dictionary.is_empty()
-        && crate::user_dictionary::generation::lacks_split_wubi_tables(
-            &database,
-            std::path::Path::new(&options.wubi_dictionary),
-        )
-        .unwrap_or(true)
-    {
-        std::path::PathBuf::from(&options.wubi_dictionary)
-    } else {
-        database
-    };
-    crate::wubi::lookup::lookup_codes(&database, text)
-}
-
 pub fn normalize_full_pinyin(input: &str, expected_syllables: usize) -> String {
     crate::pinyin::normalize::normalize_full_pinyin(input, expected_syllables)
 }
 
-/// 触屏键盘画「双拼键位提示」用的名字：粤语双拼不是普通话双拼方案，没有 `ShuangpinProfileKind`，宿主传这个名字给 [`shuangpin_key_hints`] 取它的键面。
-pub const CANTONESE_SHUANGPIN_HINTS: &str = "cantonese";
-
-/// 普通话双拼方案名（`xiaohe`、`microsoft` 等）给那个方案的键面；[`CANTONESE_SHUANGPIN_HINTS`] 给粤语双拼的键面。其他名字（包括 `custom`）什么也不给。`cantonese` 不是 `ShuangpinProfileKind` 的名字，[`shuangpin_zero_initials`]、[`encode_shuangpin`]、[`shuangpin_uses_semicolon`] 都不认它。
+/// 普通话双拼方案名（`xiaohe`、`microsoft` 等）给那个方案的键面；其他名字（包括 `custom`）什么也不给。
 pub fn shuangpin_key_hints(profile: &str) -> Vec<ShuangpinKeyHint> {
-    if profile == CANTONESE_SHUANGPIN_HINTS {
-        return crate::cantonese::shuangpin::key_hints();
-    }
     crate::shuangpin::hints::shuangpin_key_hints(profile)
 }
 

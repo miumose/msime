@@ -1542,7 +1542,6 @@ dependencies = [
  "msime-client-providers",
  "msime-client-services",
  "msime-engine",
- "msime-host-windows",
  "msime-input-runtime",
  "msime-path-trust",
  "rubato",
@@ -1555,18 +1554,6 @@ dependencies = [
  "tempfile",
  "time",
  "windows",
-]
-
-[[package]]
-name = "msime-host-windows"
-version = "0.1.0"
-dependencies = [
- "msime-client-core",
- "msime-client-providers",
- "windows",
- "windows-collections",
- "windows-numerics",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

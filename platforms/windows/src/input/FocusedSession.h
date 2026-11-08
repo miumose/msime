@@ -2,25 +2,10 @@
 #include "ContinuationHide.h"
 #include "FocusGate.h"
 #include "ReplyComposer.h"
-#include "TypingStatistics.h"
 #include <functional>
-#include <map>
 #include <string>
 
 namespace msime::windows {
-// Receives the text of a commit that has been confirmed as delivered, together
-// with the mode that produced it. Injected so the queue can be exercised
-// without touching the shared store; the default writes it there.
-using TypingStatisticsSink =
-    std::function<void(const std::string &, TypingSource)>;
-// Hands one record to the shared store on a detached thread. An empty directory or text records nothing; so does a store whose statistics are switched off, because the shared entry point checks that itself. `quiet` keeps a milestone's achievement jingle silent (see `typing_statistics_record_request`).
-void record_typing_statistics_async(const std::string &directory,
-                                    const std::string &text,
-                                    TypingSource source, bool quiet = false);
-// Hands one day's per-key press counts to the shared store on a detached thread. Same contract as above: nothing to record or a store with statistics off writes nothing.
-void record_typing_keys_async(const std::string &directory,
-                              const std::string &day,
-                              const std::map<std::string, uint64_t> &keys);
 // PredictionKept：会话停在上屏后联想、TIP 还没为这一代联想发过 Show，这个隐藏是上屏结束组字顺带发出的，联想留着，候选窗先藏起来等 Show。
 enum class HideCandidateDisposition { Rejected, Cancelled, Suppressed, PredictionKept };
 // 卷轴展开取到的完整候选列表（msime_client_all_candidates 的结果），以及取它时引擎放出扣着的尾部、代次前进后重新读到的 view（代次没变时为空）。
@@ -35,13 +20,7 @@ struct CandidateExpansionFetch {
 class FocusedSession final {
 public:
   FocusedSession(FocusGate &gate, uint64_t client, const std::string &options)
-      : gate_(gate), client_(client), session_(client, options),
-        statistics_directory_(typing_statistics_directory(options)) {}
-  // Replaces the default shared-store writer. The queue thread calls it
-  // synchronously, so an injected sink must not block.
-  void set_typing_statistics_sink(TypingStatisticsSink sink) {
-    statistics_ = std::move(sink);
-  }
+      : gate_(gate), client_(client), session_(client, options) {}
   // 换掉「全屏应用在前台」的判断（默认看 GetForegroundWindow）。测试用它让 FULLSCREEN 在两次调用之间变化，核对属性先于按键、先于激活报给核心。
   void set_fullscreen_check(std::function<bool()> check) { fullscreen_check_ = std::move(check); }
   bool prepare(const FocusLease &lease);
@@ -92,22 +71,6 @@ public:
                                        const NavigationBindings &bindings);
   /// Re-rank with the settled model once the host reports typing has stopped.
   std::optional<nlohmann::json> rerank_settled(const FocusLease &lease);
-  std::optional<nlohmann::json>
-  apply_cloud_response(const FocusLease &lease, const std::string &query,
-                       const std::string &body);
-  std::optional<nlohmann::json> apply_ai_candidates(const FocusLease &lease,
-                                                    const std::string &query,
-                                                    const std::string &candidates);
-  std::optional<nlohmann::json> resolve_ai_candidates(const FocusLease &lease,
-                                                      const std::string &query);
-  std::optional<std::string> translation_query(const FocusLease &lease);
-  // Rebuild the AI descriptor on the input queue immediately before dispatch;
-  // settings may have changed after the key reply was composed.
-  std::optional<std::string> ai_request(const FocusLease &lease,
-                                        const std::string &query);
-  std::optional<nlohmann::json>
-  apply_translations(const FocusLease &lease, uint64_t generation,
-                     const std::string &translations);
   // Recover the staged result without rerunning Engine. This does NOT permit
   // blindly resending a frame whose previous delivery is uncertain.
   std::optional<PendingReply> pending(const FocusLease &lease);
@@ -148,19 +111,6 @@ private:
   bool prepared(const FocusLease &lease) const;
   void attach_online_query(const FocusLease &lease,
                            std::optional<PendingReply> &reply);
-  // One commit's text and the mode that produced it, read off the pending
-  // reply before a confirmation clears it. Only the string is copied: the
-  // input queue runs this on every key, and copying the whole reply would deep
-  // copy its candidate list for keys that commit nothing.
-  struct Commit {
-    std::string text;
-    TypingSource source = TypingSource::Unknown;
-    // False for the text the V, "/" and "@" modes generate; see transition_counts_as_typing.
-    bool typing = true;
-  };
-  std::optional<Commit> pending_commit() const;
-  // 记下一次确认送达的上屏，只管统计：上屏音和上屏特效在派发时已经由生命周期核心按回复的 feedback 出过了。
-  void record_commit(const std::optional<Commit> &delivered);
   // 每个键之前比较一次字段属性（TIP 报的加上此刻的全屏前台），变了先报给核心。
   void refresh_field_traits();
   // 把一个键或一次上屏的打字特效交给候选窗，先发布会话的特效设置。
@@ -169,13 +119,10 @@ private:
   void publish_commit_feedback(const std::optional<PendingReply> &reply);
   // 把会话解析好的特效设置和特效包的颜色、粒子数交给界面线程，在发布特效之前调用。
   void publish_typing_effect_settings();
-  static std::string typing_statistics_directory(const std::string &options);
   FocusGate &gate_;
   uint64_t client_;
   const std::thread::id thread_ = std::this_thread::get_id();
   ServerSession session_;
-  std::string statistics_directory_;
-  TypingStatisticsSink statistics_;
   std::optional<FocusLease> lease_;
   std::optional<ReplyComposer> composer_;
   std::optional<nlohmann::json> preferences_retry_;

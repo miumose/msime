@@ -5,8 +5,7 @@
 use super::super::runtime::empty_result;
 use super::super::*;
 use super::{
-    compose_stroke, compose_zhuyin, korean_runtime, open_korean_hanja, phrase_runtime,
-    stroke_runtime, zhuyin_runtime,
+    compose_stroke, compose_zhuyin, open_korean_hanja, phrase_runtime,
 };
 
 /// 每个引擎调用的结果都能由字段直接控制的测试引擎。
@@ -25,7 +24,6 @@ struct FactEngine {
     /// 空表示 `"none"`。
     local_mode: String,
     candidate_list_open: bool,
-    key_grid: Option<KeyGrid>,
     /// 选词后剩下的读音；`None` 表示选词结束组字。
     remaining_after_select: Option<String>,
     /// 选词时引擎实际上屏的文本，用来制造"上屏和候选对不上"的情况。
@@ -64,8 +62,6 @@ impl InputEngine for FactEngine {
         Ok(EngineSnapshot {
             prediction: false,
             scheme: self.scheme,
-            key_grid: self.key_grid,
-            grid_composing: self.key_grid.is_some() && !self.text.is_empty(),
             candidate_codes: vec![String::new(); count],
             candidate_annotations: vec![String::new(); count],
             candidate_sources: if self.sources.len() == count {
@@ -78,8 +74,6 @@ impl InputEngine for FactEngine {
             candidate_answers_key: vec![true; count],
             candidate_list_open: self.candidate_list_open,
             shuangpin_profile: "xiaohe".into(),
-            answered_by_pinyin_fallback: false,
-            wubi_unique_four_code: self.scheme == 2 && self.text.len() == 4 && count == 1,
             local_mode: if self.local_mode.is_empty() {
                 "none".into()
             } else {
@@ -110,13 +104,6 @@ impl InputEngine for FactEngine {
             return Ok(empty_result(true));
         }
         Ok(empty_result(false))
-    }
-    fn grid_key(&mut self, letter: u8) -> Result<EngineResult, RuntimeError> {
-        if self.key_grid != Some(KeyGrid::FourteenKey) {
-            return Ok(empty_result(false));
-        }
-        self.text.push(char::from(letter));
-        Ok(empty_result(true))
     }
     fn command(&mut self, command: Command) -> Result<EngineResult, RuntimeError> {
         let composing = !self.text.is_empty();
@@ -572,33 +559,6 @@ fn a_digit_records_the_seat_on_the_visible_page() {
 }
 
 #[test]
-fn fourteen_key_commit_raw_finishes_from_the_highlight() {
-    for command in [Command::CommitRaw, Command::CommitRawWithoutLearning] {
-        let mut runtime = focused(FactEngine {
-            key_grid: Some(KeyGrid::FourteenKey),
-            ..pinyin()
-        });
-        runtime.dispatch(Action::GridKey(b'n')).unwrap();
-        runtime.dispatch(Action::GridKey(b'h')).unwrap();
-        runtime.dispatch(Action::NextCandidate).unwrap();
-        let done = runtime.dispatch(Action::Command(command)).unwrap();
-        assert_eq!(done.commit.as_deref(), Some("拟好"));
-        let facts = runtime.facts();
-        assert_eq!(
-            facts.selection,
-            Some(fact(
-                1,
-                5,
-                SelectionHow::GridRaw,
-                SelectionOutcome::Committed
-            ))
-        );
-        // 14 键的组码不是可上屏的字母，这一路是选词，不是原样上屏。
-        assert!(!facts.raw);
-    }
-}
-
-#[test]
 fn select_and_any_candidate_record_their_own_how() {
     let mut runtime = focused(pinyin());
     type_keys(&mut runtime, b"ni");
@@ -787,30 +747,6 @@ fn a_pick_inside_sentence_conversion_pins_without_committing() {
 }
 
 #[test]
-fn a_pick_from_the_zhuyin_list_pins_the_span() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut runtime = zhuyin_runtime(directory.path());
-    compose_zhuyin(&mut runtime, "su3cl3");
-    let opened = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert!(opened.view.candidate_list_open);
-    // 打开列表的空格是注音的拼写符号，不是选择。
-    assert_eq!(selection(&runtime), None);
-    let source = opened.view.candidates[2].source;
-    let picked = type_keys(&mut runtime, b"3");
-    assert!(picked.handled && picked.commit.is_none());
-    assert_eq!(picked.view.preedit, "你郝");
-    assert_eq!(
-        selection(&runtime),
-        Some(fact(
-            2,
-            source,
-            SelectionHow::Digit,
-            SelectionOutcome::Pinned
-        ))
-    );
-}
-
-#[test]
 fn a_pick_that_leaves_reading_composing_is_partial() {
     // 粤拼：覆盖开头几个音节的候选立即上屏，其余继续组字；方案从不暂存词段。
     let mut runtime = focused(FactEngine {
@@ -921,79 +857,6 @@ fn enter_commits_the_raw_reading() {
     let facts = runtime.facts();
     assert_eq!(facts.selection, None);
     assert!(facts.raw);
-}
-
-#[test]
-fn a_space_the_scheme_spells_with_is_not_a_pick() {
-    // 列表开着：这时误记的高亮选择会被核对成"钉住"报出来，所以 `None` 才说明这条路由没有记。
-    let mut runtime = focused(FactEngine {
-        scheme: 6,
-        spelling_symbols: " ".into(),
-        candidate_list_open: true,
-        ..pinyin()
-    });
-    type_keys(&mut runtime, b"su");
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert!(space.commit.is_none());
-    assert_eq!(space.view.editing_text, "su ");
-    assert_eq!(selection(&runtime), None);
-
-    // 真实的注音引擎：`su3cl3` 之后空格是一声。
-    let directory = tempfile::tempdir().unwrap();
-    let mut runtime = zhuyin_runtime(directory.path());
-    let typed = compose_zhuyin(&mut runtime, "su3cl3");
-    assert!(typed.view.spelling_symbols.contains(' '));
-    runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(selection(&runtime), None);
-}
-
-#[test]
-fn space_with_no_rows_commits_the_scheme_text_without_a_pick() {
-    let mut runtime = focused(FactEngine {
-        scheme: 9,
-        ..FactEngine::default()
-    });
-    type_keys(&mut runtime, b"zzz");
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(space.commit.as_deref(), Some("zzz"));
-    assert_eq!(selection(&runtime), None);
-    assert!(!runtime.facts().raw);
-
-    // 真实的笔画引擎：没有候选时空格上屏笔画字母；有候选时空格是选高亮行。
-    let directory = tempfile::tempdir().unwrap();
-    let mut runtime = stroke_runtime(directory.path());
-    compose_stroke(&mut runtime, "zzz");
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(space.commit.as_deref(), Some("zzz"));
-    assert_eq!(selection(&runtime), None);
-    compose_stroke(&mut runtime, "hh");
-    runtime.dispatch(Action::NextCandidate).unwrap();
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(space.commit.as_deref(), Some("三"));
-    assert_eq!(
-        selection(&runtime).map(|fact| (fact.seat, fact.how, fact.outcome)),
-        Some((1, SelectionHow::Highlighted, SelectionOutcome::Committed))
-    );
-}
-
-#[test]
-fn korean_hanja_confirmation_is_a_highlighted_pick_and_a_bare_syllable_is_not() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut runtime = korean_runtime(directory.path());
-    open_korean_hanja(&mut runtime, "gks");
-    runtime.dispatch(Action::NextCandidate).unwrap();
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(space.commit.as_deref(), Some("漢"));
-    assert_eq!(
-        selection(&runtime).map(|fact| (fact.seat, fact.how, fact.outcome)),
-        Some((1, SelectionHow::Highlighted, SelectionOutcome::Committed))
-    );
-
-    // 没开汉字列表时空格上屏音节本身，不是选择。
-    type_keys(&mut runtime, b"gks");
-    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
-    assert_eq!(space.commit.as_deref(), Some("한"));
-    assert_eq!(selection(&runtime), None);
 }
 
 #[test]

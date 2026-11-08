@@ -4,11 +4,10 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use msime_engine::assets::USER_JOURNAL;
-use msime_engine::vietnamese::{InputMethod, ToneStyle};
 use msime_engine::{
-    CandidateEdge, CandidateSource, Command, FrequencyAdjustmentMode, KeyGrid,
-    PersonalDictionaryEntry, PersonalDictionaryKind, RuntimePaths, SchemeType, Session,
-    SessionOptions, ShuangpinProfileKind,
+    CandidateEdge, CandidateSource, Command, FrequencyAdjustmentMode, PersonalDictionaryEntry,
+    PersonalDictionaryKind, RuntimePaths, SchemeType, Session, SessionOptions,
+    ShuangpinProfileKind,
 };
 use serde_json::{json, Map, Value};
 
@@ -17,14 +16,90 @@ use super::fixture::stage_fixture;
 use super::golden_dir;
 use super::snapshot::{dump_journal, query_rows, result_json, scrub, snapshot_json};
 
-/// The file name a scenario fixture stages `msime-cantonese.db` under, beside the resource set's own files.
-pub const CANTONESE_DICTIONARY: &str = "msime-cantonese.db";
-/// The file name a scenario fixture stages `msime-zhuyin.db` under, beside the resource set's own files.
-pub const ZHUYIN_DICTIONARY: &str = "msime-zhuyin.db";
-/// The file name a scenario fixture stages `msime-stroke.db` under, beside the resource set's own files.
-pub const STROKE_DICTIONARY: &str = "msime-stroke.db";
-
 pub const SCENARIO_ENV: &str = "MSIME_GOLDEN_SCENARIO";
+
+/// Ops the pinyin-only engine replays; scenarios using anything else are skipped.
+const SUPPORTED_OPS: &[&str] = &[
+    "type",
+    "char",
+    "command",
+    "candidate_key",
+    "punctuation",
+    "select",
+    "select_on_page",
+    "select_edge",
+    "pin",
+    "remove",
+    "fix_position",
+    "clear_position",
+    "finish",
+    "page",
+    "switch_scheme",
+    "set_helpcode_schema",
+    "set_helpcode_enabled",
+    "set_dedicated_english",
+    "set_chinese_punctuation_enabled",
+    "set_punctuation_lock",
+    "set_paired_punctuation_enabled",
+    "balance_paired_punctuation_after_auto_close",
+    "set_personal_context_enabled",
+    "reset_cache",
+    "reset_context",
+    "expand_initial_candidates",
+    "apply_online_candidates",
+    "reopen",
+    "new_generation",
+    "dump_journal",
+    "query",
+    "validate_entry",
+    "dict_edit",
+    "dict_list",
+];
+
+const REMOVED_OPTIONS: &[&str] = &[
+    "vietnamese_input_method",
+    "vietnamese_tone_style",
+    "wubi_mixed_pinyin",
+];
+
+fn pinyin_scheme(name: &str) -> bool {
+    matches!(name, "quanpin" | "shuangpin")
+}
+
+fn options_supported(value: &Value) -> bool {
+    let Some(fields) = value.as_object() else {
+        return true;
+    };
+    if let Some(scheme) = fields.get("scheme") {
+        if !scheme.as_str().is_some_and(pinyin_scheme) {
+            return false;
+        }
+    }
+    !fields
+        .keys()
+        .any(|key| REMOVED_OPTIONS.contains(&key.as_str()))
+}
+
+/// A scenario is replayable when it only uses the pinyin schemes and the ops this fork still has.
+fn scenario_supported(spec: &Value) -> bool {
+    if spec.get("options").is_some_and(|options| !options_supported(options)) {
+        return false;
+    }
+    let Some(steps) = spec["steps"].as_array() else {
+        return false;
+    };
+    steps.iter().all(|step| {
+        let op = step["op"].as_str().unwrap_or_default();
+        if !SUPPORTED_OPS.contains(&op) {
+            return false;
+        }
+        if op == "switch_scheme" && !step["arg"].as_str().is_some_and(pinyin_scheme) {
+            return false;
+        }
+        step.get("options")
+            .is_none_or(|options| options_supported(options))
+    })
+}
 
 /// Differences printed per scenario before the rest is summarised as a count.
 const MAX_DIFFS_PER_SCENARIO: usize = 40;
@@ -47,6 +122,8 @@ pub fn selected_scenarios_from(filter: Option<&str>) -> Vec<PathBuf> {
         })
         .collect();
     all.sort();
+    // 这个裁剪版只保留全拼、双拼能重放的情景。
+    all.retain(|path| scenario_supported(&read_json(path)));
     let names: Vec<&str> = filter
         .unwrap_or_default()
         .split(',')
@@ -62,7 +139,7 @@ pub fn selected_scenarios_from(filter: Option<&str>) -> Vec<PathBuf> {
             let path = directory.join(format!("{name}.json"));
             assert!(
                 all.contains(&path),
-                "{SCENARIO_ENV} names {name}, which has no scenario file"
+                "{SCENARIO_ENV} names {name}, which has no supported pinyin scenario file"
             );
             path
         })
@@ -225,20 +302,6 @@ pub fn apply_options(options: &mut SessionOptions, value: &Value) {
                     .unwrap_or_else(|| panic!("unknown shuangpin profile {v}"));
             }
             "shuangpin_preedit_uses_raw" => options.shuangpin_preedit_uses_raw = as_bool(v),
-            "vietnamese_input_method" => {
-                options.vietnamese_input_method = match as_str(v) {
-                    "telex" => InputMethod::Telex,
-                    "vni" => InputMethod::Vni,
-                    other => panic!("unknown vietnamese input method {other}"),
-                };
-            }
-            "vietnamese_tone_style" => {
-                options.vietnamese_tone_style = match as_str(v) {
-                    "modern" => ToneStyle::Modern,
-                    "classic" => ToneStyle::Classic,
-                    other => panic!("unknown vietnamese tone style {other}"),
-                };
-            }
             "helpcode_schema" => options.helpcode_schema = as_str(v).to_owned(),
             "autocorrect_types" => options.autocorrect_types = as_u32(v),
             "helpcode" => options.helpcode = as_bool(v),
@@ -297,7 +360,6 @@ pub fn apply_options(options: &mut SessionOptions, value: &Value) {
                     options.expressive.kaomoji_candidates = as_bool(kaomoji);
                 }
             }
-            "wubi_mixed_pinyin" => options.wubi.mixed_pinyin = as_bool(v),
             "personal_context" => options.personal_context = as_bool(v),
             // Harness-side: the page view and the generation name.
             "page_size" | "content_id" => {}
@@ -352,25 +414,7 @@ fn scheme_from(name: &str) -> SchemeType {
     match name {
         "quanpin" => SchemeType::Quanpin,
         "shuangpin" => SchemeType::Shuangpin,
-        "wubi" => SchemeType::Wubi,
-        "japanese" => SchemeType::JapaneseRomaji,
-        "korean" => SchemeType::Korean,
-        "cantonese" => SchemeType::Cantonese,
-        "vietnamese" => SchemeType::Vietnamese,
-        "tibetan" => SchemeType::Tibetan,
-        "zhuyin" => SchemeType::Zhuyin,
-        "stroke" => SchemeType::Stroke,
-        _ => panic!("unknown scheme {name}"),
-    }
-}
-
-/// `set_key_grid` 的取值，与 View 的 `key_grid` 同名。
-fn key_grid_from(name: &str) -> Option<KeyGrid> {
-    match name {
-        "none" => None,
-        "nine_key" => Some(KeyGrid::NineKey),
-        "fourteen_key" => Some(KeyGrid::FourteenKey),
-        _ => panic!("unknown key grid {name}"),
+        _ => panic!("unknown or unsupported scheme {name}"),
     }
 }
 
@@ -484,19 +528,6 @@ impl Scenario {
         });
         let mut options = self.options.clone();
         options.paths = self.paths.clone();
-        // `msime-cantonese.db`, `msime-zhuyin.db` and `msime-stroke.db` ship beside the resource set, so a fixture that stages one hands its path to the session as a host would.
-        let cantonese = self.resources.join(CANTONESE_DICTIONARY);
-        if cantonese.exists() {
-            options.cantonese_dictionary = cantonese;
-        }
-        let zhuyin = self.resources.join(ZHUYIN_DICTIONARY);
-        if zhuyin.exists() {
-            options.zhuyin_dictionary = zhuyin;
-        }
-        let stroke = self.resources.join(STROKE_DICTIONARY);
-        if stroke.exists() {
-            options.stroke_dictionary = stroke;
-        }
         self.session = Some(Session::new(options).unwrap_or_else(|error| {
             panic!(
                 "Session::new failed: {}",
@@ -667,10 +698,6 @@ impl Scenario {
                 self.session().set_dedicated_english(as_bool(arg));
                 None
             }
-            "set_wubi_mixed_pinyin" => {
-                self.session().set_wubi_mixed_pinyin(as_bool(arg));
-                None
-            }
             "set_chinese_punctuation_enabled" => {
                 self.session().set_chinese_punctuation_enabled(as_bool(arg));
                 None
@@ -691,31 +718,6 @@ impl Scenario {
                 self.session()
                     .balance_paired_punctuation_after_auto_close(opening);
                 None
-            }
-            "set_nine_key_enabled" => {
-                self.session().set_nine_key_enabled(as_bool(arg));
-                None
-            }
-            "set_key_grid" => {
-                self.session().set_key_grid(key_grid_from(as_str(arg)));
-                None
-            }
-            // 每个字节一次 `grid_key`，结果的形状与 `type` 相同。
-            "grid_key" => Some(self.type_keys(as_str(arg), |session, byte| session.grid_key(byte))),
-            "choose_nine_key_spelling" => {
-                let index = if arg.is_u64() {
-                    as_index(arg)
-                } else {
-                    // {"spelling": "ni"} picks by text, like the reference test's std::find over nine_key_spellings.
-                    let spelling = as_str(&arg["spelling"]);
-                    self.session()
-                        .snapshot()
-                        .nine_key_spellings
-                        .iter()
-                        .position(|offered| offered == spelling)
-                        .unwrap_or_else(|| panic!("spelling not offered: {spelling}"))
-                };
-                keyed(self.session().choose_nine_key_spelling(index))
             }
             "set_personal_context_enabled" => {
                 self.session().set_personal_context_enabled(as_bool(arg));
@@ -885,7 +887,8 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 300);
+        // 300 份录制里只有 230 份只用全拼、双拼和裁剩的操作。
+        assert_eq!(all.len(), 230);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);
@@ -894,12 +897,17 @@ mod tests {
 
     #[test]
     fn the_filter_keeps_only_the_named_scenarios() {
-        let picked = selected_scenarios_from(Some("remove_wubi, qp_select_edge"));
+        let picked = selected_scenarios_from(Some(
+            "bridge_cloud_query_manual_segmentation, qp_select_edge",
+        ));
         let names: Vec<_> = picked
             .iter()
             .map(|path| path.file_stem().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["remove_wubi", "qp_select_edge"]);
+        assert_eq!(
+            names,
+            ["bridge_cloud_query_manual_segmentation", "qp_select_edge"]
+        );
     }
 
     #[test]
@@ -910,54 +918,17 @@ mod tests {
 
     #[test]
     fn every_scenario_uses_only_known_options_and_ops() {
-        const OPS: &[&str] = &[
-            "type",
-            "char",
-            "command",
-            "candidate_key",
-            "punctuation",
-            "select",
-            "select_on_page",
-            "select_edge",
-            "pin",
-            "remove",
-            "fix_position",
-            "clear_position",
-            "finish",
-            "page",
-            "switch_scheme",
-            "set_helpcode_schema",
-            "set_helpcode_enabled",
-            "set_dedicated_english",
-            "set_wubi_mixed_pinyin",
-            "set_chinese_punctuation_enabled",
-            "set_punctuation_lock",
-            "set_paired_punctuation_enabled",
-            "balance_paired_punctuation_after_auto_close",
-            "set_nine_key_enabled",
-            "set_key_grid",
-            "grid_key",
-            "choose_nine_key_spelling",
-            "set_personal_context_enabled",
-            "reset_cache",
-            "reset_context",
-            "expand_initial_candidates",
-            "apply_online_candidates",
-            "reopen",
-            "new_generation",
-            "dump_journal",
-            "query",
-            "validate_entry",
-            "dict_edit",
-            "dict_list",
-        ];
         for path in selected_scenarios_from(None) {
             let spec = read_json(&path);
             let mut options = reference_options();
             apply_options(&mut options, &spec["options"]);
             for step in spec["steps"].as_array().unwrap() {
                 let op = step["op"].as_str().unwrap();
-                assert!(OPS.contains(&op), "{}: unknown op {op}", path.display());
+                assert!(
+                    SUPPORTED_OPS.contains(&op),
+                    "{}: unknown op {op}",
+                    path.display()
+                );
                 if op == "command" {
                     assert!(Command::from_name(step["arg"].as_str().unwrap()).is_some());
                 }
@@ -979,7 +950,7 @@ mod tests {
                 "local_modes": {"emoji": false, "temporary_japanese": false},
                 "english": {"mixed_candidates": true, "minimum_prefix": 4},
                 "expressive": {"emoji_candidates": true},
-                "wubi_mixed_pinyin": true, "personal_context": false, "page_size": 2, "content_id": "v2",
+                "personal_context": false, "page_size": 2, "content_id": "v2",
             }),
         );
         assert_eq!(options.scheme, SchemeType::Shuangpin);
@@ -1004,21 +975,7 @@ mod tests {
         assert!(options.english.mixed_candidates);
         assert_eq!(options.english.minimum_prefix, 4);
         assert!(options.expressive.emoji_candidates && !options.expressive.kaomoji_candidates);
-        assert!(options.wubi.mixed_pinyin && !options.personal_context);
-    }
-
-    #[test]
-    fn vietnamese_options_map_onto_the_session_fields() {
-        let mut options = reference_options();
-        assert_eq!(options.vietnamese_input_method, InputMethod::Telex);
-        assert_eq!(options.vietnamese_tone_style, ToneStyle::Modern);
-        apply_options(
-            &mut options,
-            &json!({"scheme": "vietnamese", "vietnamese_input_method": "vni", "vietnamese_tone_style": "classic"}),
-        );
-        assert_eq!(options.scheme, SchemeType::Vietnamese);
-        assert_eq!(options.vietnamese_input_method, InputMethod::Vni);
-        assert_eq!(options.vietnamese_tone_style, ToneStyle::Classic);
+        assert!(!options.personal_context);
     }
 
     #[test]

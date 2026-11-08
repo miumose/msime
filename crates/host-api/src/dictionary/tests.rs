@@ -17,8 +17,6 @@ fn import_engine_options() -> msime_engine::host::EngineOptions {
         shuangpin_custom_profile: None,
         shuangpin_preedit_uses_raw: true,
         shuangpin_preedit_separated: false,
-        force_cantonese_shuangpin: false,
-        cantonese_output_conversion: None,
         single_character_only: false,
         caret_edit_suffix: false,
         learning: false,
@@ -27,15 +25,10 @@ fn import_engine_options() -> msime_engine::host::EngineOptions {
         autocorrect_transposition: true,
         autocorrect_neighbor: true,
         fuzzy_pinyin_rules: 0,
-        wubi_mixed_pinyin: false,
-        wubi_z_wildcard: false,
-        wubi_reverse_code: true,
-        wubi_profile: 0,
         helpcode: false,
         strict_quanpin_helpcode: false,
         show_helpcode: true,
         shuangpin_helpcode_modes: msime_engine::ShuangpinHelpcodeModes::default(),
-        grid_helpcode: false,
         helpcode_schema: "ziranma".into(),
         helpcode_trigger_key: None,
         chinese_punctuation: true,
@@ -55,8 +48,6 @@ fn import_engine_options() -> msime_engine::host::EngineOptions {
         mixed_emoji: false,
         mixed_kaomoji: false,
         mixed_symbols: false,
-        mixed_japanese: false,
-        multilingual_languages: Vec::new(),
         local_unicode: true,
         local_date_time: true,
         local_date_time_inline: true,
@@ -92,14 +83,6 @@ fn import_engine_options() -> msime_engine::host::EngineOptions {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
-        vietnamese_input_method: 0,
-        vietnamese_tone_style: 0,
-        korean_layout: 0,
-        cantonese_dictionary: String::new(),
-        zhuyin_dictionary: String::new(),
-        stroke_dictionary: String::new(),
-        japanese_dictionary: String::new(),
-        wubi_dictionary: String::new(),
     }
 }
 
@@ -543,117 +526,6 @@ fn a_lookup_names_where_each_candidate_came_from_and_leaves_the_user_data_alone(
     assert!(lookup_candidates(&options, None, "ceshi", 0).is_err());
     assert!(lookup_candidates(&options, None, "ceshi", MAX_LOOKUP_CANDIDATES + 1).is_err());
     assert_eq!(tree(&directory.path().join("user")), before);
-}
-
-/// 日文混输开着时，查询会话照用户的设置混进日文转换，来源报成 `Japanese`；关着时没有这一行。
-#[test]
-#[cfg(not(target_os = "android"))]
-fn a_lookup_keeps_the_users_japanese_mixing() {
-    let directory = tempfile::tempdir().unwrap();
-    let plain = word_fixture(
-        directory.path(),
-        "INSERT INTO tbl_2_c VALUES('ce''shi','cs','测试',100);",
-    );
-    std::fs::write(
-        directory.path().join("resources/msime-japanese.dat"),
-        crate::tests::single_lemma_japanese_model("おはよう", "おはよう", 500),
-    )
-    .unwrap();
-    let root = directory.path().to_str().unwrap();
-    let mut preferences = msime_client_core::preferences::Preferences::default();
-    preferences.mixed_input.japanese = true;
-    let mixing = DictionaryOptions::from_host_document(json!({
-        "api_version": 1,
-        "resources": format!("{root}/resources"),
-        "user_data": format!("{root}/user"),
-        "cache": format!("{root}/cache"),
-        "dictionaries": format!("{root}/dictionaries"),
-        "preferences": preferences,
-        "preferences_directory": root,
-    }))
-    .unwrap();
-
-    let candidates = lookup_candidates(&mixing, None, "ohayou", 10).unwrap();
-    assert_eq!(
-        candidates.first(),
-        Some(&LookupCandidate {
-            text: "おはよう".into(),
-            code: "ohayou".into(),
-            origin: CandidateOrigin::Japanese,
-            weight: None,
-        }),
-        "{candidates:?}"
-    );
-    assert_eq!(
-        candidates
-            .iter()
-            .filter(|candidate| candidate.origin == CandidateOrigin::Japanese)
-            .count(),
-        1
-    );
-    assert!(lookup_candidates(&plain, None, "ohayou", 10)
-        .unwrap()
-        .iter()
-        .all(|candidate| candidate.origin != CandidateOrigin::Japanese));
-}
-
-/// 偏好选着新世纪五笔时，查询读 `wubixsj` 表（力是 `ent`，不是 86 的 `lt`），用户加的新世纪词按自己的种类存取、找到来源。
-#[test]
-#[cfg(not(target_os = "android"))]
-fn a_new_century_lookup_reads_its_own_table_and_user_words() {
-    let directory = tempfile::tempdir().unwrap();
-    let options = word_fixture_with(
-        directory.path(),
-        "INSERT INTO wubi86 VALUES('lt','力',500);
-         CREATE TABLE wubixsj(key TEXT,value TEXT,weight INTEGER);
-         INSERT INTO wubixsj VALUES('ent','力',500);",
-        msime_client_core::preferences::Preferences {
-            wubi_profile: msime_client_core::preferences::WubiProfile::WubiXsj,
-            ..Default::default()
-        },
-    );
-    assert_eq!(options.0.wubi_profile, 2);
-    edit_dictionary_word(
-        &options,
-        &WordEdit::Add(
-            WordKind::WubiXsj,
-            NewWord {
-                code: Some("ENT".into()),
-                word: "合成力".into(),
-                weight: Some(900),
-            },
-        ),
-        "xsj-1",
-    )
-    .unwrap();
-    let listed = dictionary_words(&options, WordKind::WubiXsj, "", false, 0, 10).unwrap();
-    assert_eq!(
-        listed
-            .words
-            .iter()
-            .map(|word| (word.code.as_str(), word.word.as_str()))
-            .collect::<Vec<_>>(),
-        [("ent", "合成力")]
-    );
-    assert!(dictionary_words(&options, WordKind::Wubi, "", false, 0, 10)
-        .unwrap()
-        .words
-        .is_empty());
-    let candidates = lookup_candidates(&options, Some(LookupScheme::Wubi), "ent", 10).unwrap();
-    let find = |text: &str| {
-        candidates
-            .iter()
-            .find(|candidate| candidate.text == text)
-            .map(|candidate| (candidate.origin, candidate.weight))
-            .unwrap_or_else(|| panic!("{text} missing from {candidates:?}"))
-    };
-    assert_eq!(find("合成力"), (CandidateOrigin::UserWord, Some(900)));
-    assert_eq!(find("力"), (CandidateOrigin::Dictionary, Some(500)));
-    assert!(
-        lookup_candidates(&options, Some(LookupScheme::Wubi), "lt", 10)
-            .unwrap()
-            .is_empty()
-    );
 }
 
 /// Engine 的每个个人词库种类都能在宿主的种类之间来回换，不会落到 `personal_kind` 的 `unreachable!`。
@@ -1655,83 +1527,3 @@ fn scel_text_feeds_the_queued_import_with_word_order_lines() {
     assert_eq!(report["entries"][0]["weight"], 10_000);
 }
 
-fn queued_collection_sync_fixture() -> (tempfile::TempDir, HostOptions, PersonalDictionaryStore) {
-    use msime_client_services::dictionary::collections::DictionaryCollectionsStore;
-    let directory = tempfile::tempdir().unwrap();
-    let options = HostOptions::from_document(crate::tests::host_options_with_main_dictionary(
-        directory.path(),
-    ))
-    .unwrap();
-    let personal = PersonalDictionaryStore::new(directory.path().join("PersonalDictionary"));
-    let words = (0..129)
-        .map(|index: u32| PersonalWord {
-            kind: msime_client_services::dictionary::personal::PersonalWordKind::Pinyin,
-            key: "ni'hao".into(),
-            value: format!("{}词", char::from_u32(0x4e00 + index).unwrap()),
-            weight: 100,
-        })
-        .collect();
-    let collections = DictionaryCollectionsStore::new(
-        directory.path(),
-        PersonalDictionaryStore::new(directory.path().join("PersonalDictionary")),
-    );
-    assert_eq!(collections.queue_words(words).unwrap().outbox_pending, 1);
-    (directory, options, personal)
-}
-
-/// 在下一批开始时由真实输入会话抢占租约，已完成的进展仍返回给通知方。
-#[test]
-fn collection_sync_keeps_progress_when_next_batch_is_busy() {
-    let (_directory, options, personal) = queued_collection_sync_fixture();
-    let engine_options = options.clone().into_engine_options();
-    let mut attempts = 0;
-    let mut session = None;
-    let result =
-        synchronize_collections_with_access(&options, std::time::Duration::from_secs(60), || {
-            attempts += 1;
-            if attempts == 2 {
-                session = DictionaryAccess::try_session(
-                    Path::new(&engine_options.user_data),
-                    Path::new(&engine_options.dictionaries),
-                )
-                .unwrap();
-                assert!(session.is_some(), "前一批已释放维护租约");
-            }
-            DictionaryAccess::try_maintenance(
-                Path::new(&engine_options.user_data),
-                Path::new(&engine_options.dictionaries),
-            )
-            .map_err(|_| "dictionary access unavailable".to_owned())
-        });
-    let progress = result.expect("后批忙不能丢掉已应用数量");
-    assert_eq!(progress["applied_count"], 128, "{progress}");
-    assert_eq!(progress["pending_count"], 1, "{progress}");
-    assert_eq!(progress["sent"], 1, "{progress}");
-    assert_eq!(personal.read().unwrap().pending_count(), 1);
-    drop(session);
-    let resumed =
-        synchronize_collections_with_budget(&options, std::time::Duration::from_secs(60)).unwrap();
-    assert_eq!(resumed["pending_count"], 0, "{resumed}");
-    assert_eq!(resumed["applied_count"], 1, "{resumed}");
-}
-
-/// 忙碌可重试，但维护租约的存储失败仍要报告，不能拿前批成功遮住它。
-#[test]
-fn collection_sync_does_not_hide_later_lease_storage_errors() {
-    let (_directory, options, _personal) = queued_collection_sync_fixture();
-    let engine_options = options.clone().into_engine_options();
-    let mut attempts = 0;
-    let result =
-        synchronize_collections_with_access(&options, std::time::Duration::from_secs(60), || {
-            attempts += 1;
-            if attempts == 2 {
-                return Err("dictionary access unavailable".to_owned());
-            }
-            DictionaryAccess::try_maintenance(
-                Path::new(&engine_options.user_data),
-                Path::new(&engine_options.dictionaries),
-            )
-            .map_err(|_| "dictionary access unavailable".to_owned())
-        });
-    assert_eq!(result.unwrap_err(), "dictionary access unavailable");
-}

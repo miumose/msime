@@ -8,10 +8,8 @@
 #include "CandidateCanvasImages.h"
 #include "CandidateSkin.h"
 #include "CandidateThemeSettings.h"
-#include "SkinResourceRevision.h"
 #include "DesktopCandidates.h"
 #include "CandidateWindowStyleSettings.h"
-#include "ClipboardHistory.h"
 #include "ComponentFailure.h"
 #include "DiagnosticListener.h"
 #include "DedicatedEnglishMailbox.h"
@@ -29,8 +27,6 @@
 #include "FullscreenForeground.h"
 #include "HostApiDiagnosticLine.h"
 #include "HelpcodeRoot.h"
-#include "SoundPackRoot.h"
-#include "PluginPackRoot.h"
 #include "RerankModelRoot.h"
 #include "MaintenanceHotkey.h"
 #include "NativeTextInput.h"
@@ -38,8 +34,6 @@
 #include "AppInputModeRules.h"
 #include "InputModeHudWindow.h"
 #include "InputStateHudFeedback.h"
-#include "TypingEffectOverlay.h"
-#include "TypingFeedbackPreference.h"
 #include "ShuangpinKeymapWindow.h"
 #include "ProcessImageName.h"
 #include "ModeMailbox.h"
@@ -53,21 +47,10 @@
 #include "ServerLaunch.h"
 #include "ShellLauncher.h"
 #include "StateRootLease.h"
-#include "SystemAudioMuter.h"
 #include "ToolbarModeCommand.h"
 #include "TrayMenuDispatch.h"
 #include "TrayMenuWindow.h"
-#include "UpdateNotifier.h"
-#include "../../common/UpdateRecordDirectory.h"
-#include "../../../common/VocabularyDueMenu.h"
-#include "../../../common/ReadAloudText.h"
-#include "DictionarySyncSchedule.h"
-#include "DictionarySyncWorker.h"
-#include "../../common/DictionarySyncDirectory.h"
-#include "SystemSpeech.h"
 #include "WatchdogPolicy.h"
-#include "Telemetry.h"
-#include "TelemetryConsent.h"
 #include "RevisionFence.h"
 #include "WindowsServer.h"
 #include "ipc_negotiation.h"
@@ -81,7 +64,6 @@
 #include <cstdlib>
 #include <exception>
 #include <thread>
-#include <curl/curl.h>
 #ifdef _WIN32
 #include "StateDirectory.h"
 #endif
@@ -106,77 +88,6 @@ std::wstring configured_shell_command() {
       static_cast<DWORD>(value.size()));
   return length && length < value.size() ? std::wstring(value.data(), length)
                                          : std::wstring{};
-}
-// Resolve the global theme for one surface through the shared layer. Appearance is not worth failing a running Server over, so a refused request or an unreadable answer draws the native tokens.
-msime::windows::CandidateThemeResolution
-resolve_theme(const nlohmann::json &request) {
-  try {
-    const auto body = request.dump();
-    auto owned = msime::host_api::own_string(
-        msime_client_resolve_theme(
-            reinterpret_cast<const uint8_t *>(body.data()), body.size()));
-    if (!owned)
-      return {};
-    const auto document = nlohmann::json::parse(owned.get(), nullptr, false);
-    if (document.is_discarded() || !document.is_object() ||
-        !document.value("ok", false) || !document.contains("value"))
-      return {};
-    if (auto theme =
-            msime::windows::candidate_theme_resolution(document.at("value")))
-      return *theme;
-  } catch (const std::exception &) {
-  }
-  return {};
-}
-// The global theme picker's ids and titles. The catalog is built into the shared layer and cannot change while the Server runs, so it is read once; an unreadable answer leaves the tray's 主题 row without a title.
-nlohmann::json theme_catalog() {
-  try {
-    auto owned = msime::host_api::own_string(msime_client_theme_catalog());
-    if (owned)
-      return nlohmann::json::parse(owned.get(), nullptr, false);
-  } catch (const std::exception &) {
-  }
-  return nlohmann::json();
-}
-// 今日待复习的张数（msime_client_vocabulary_due_count），读不出来时是 -1。目录与设置窗口、共享应用的背单词页相同：状态目录、Server 所在的目录（内置词书装在它的 wordbooks 下）和状态目录下的插件目录。托盘卡片打开时调一次，读进度文档和选中的一本书，不在按键路径上。
-int32_t vocabulary_due_count(const std::filesystem::path &state_root,
-                             const std::filesystem::path &resources) {
-  const auto day = msime::vocabulary_due::local_day(std::time(nullptr));
-  if (day.empty() || state_root.empty() || resources.empty())
-    return -1;
-  try {
-    const auto request = nlohmann::json{
-        {"directory", state_root.u8string()},
-        {"resources", resources.u8string()},
-        {"plugins", (state_root / L"plugins").u8string()},
-        {"day", day}}.dump();
-    return msime_client_vocabulary_due_count(
-        reinterpret_cast<const uint8_t *>(request.data()), request.size());
-  } catch (...) {
-    // 路径转不成 UTF-8：当作读不出来，这一行不列出。
-    return -1;
-  }
-}
-// The artwork and minimum width of the package a resolved theme draws. The theme names the package only when it is drawn in this layout and mode, so there is no gate here.
-msime::windows::CandidateSkinAssets
-resolve_skin_assets(const std::filesystem::path &root, const std::string &id) {
-  if (root.empty() || id.empty())
-    return {};
-  try {
-    const auto directory = root.u8string();
-    auto owned = msime::host_api::own_string(
-        msime_client_skin_catalog(
-            reinterpret_cast<const uint8_t *>(directory.data()),
-            directory.size()));
-    if (owned) {
-      const auto catalog = nlohmann::json::parse(owned.get(), nullptr, false);
-      if (!catalog.is_discarded() && catalog.value("ok", false))
-        return msime::windows::candidate_skin_assets(catalog.at("value"), id,
-                                                     root);
-    }
-  } catch (const std::exception &) {
-  }
-  return {};
 }
 std::atomic<bool> stopping{false};
 std::atomic<bool> restart_requested{false};
@@ -221,49 +132,6 @@ std::filesystem::path production_state_directory() {
 #else
   return {};
 #endif
-}
-// The anonymous account's secret and tokens belong to the Windows user running this Server, so they live in that user's %LOCALAPPDATA%\<本版本的用户目录>\account（full 是 %LOCALAPPDATA%\MSIME\account，版本表 platforms.windows.user_data_directory）。The state root is no place for them: an installed Server's is the installer's DataDir, one directory for the whole machine that every user may modify. 每个版本各自登录，退出一个版本的账号不会删掉另一个版本的令牌。
-std::filesystem::path anonymous_account_directory() {
-#ifdef _WIN32
-  PWSTR local = nullptr;
-  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
-    CoTaskMemFree(local);
-    return {};
-  }
-  const auto directory = std::filesystem::path(local) / MSIME_EDITION_USER_DATA_DIRECTORY / L"account";
-  CoTaskMemFree(local);
-  return directory;
-#else
-  return {};
-#endif
-}
-// 本机自报的 User-Agent（#8201 的 P11）：Rust 拼出，注册匿名账号时带上，服务端「我的设备」据此显示 windows、版本号和设备。拼不出时为空，注册照旧不带它。
-std::string windows_client_agent() {
-  const auto device = msime::windows::windows_device_model();
-  const auto system = msime::windows::windows_system_description();
-  const auto request =
-      nlohmann::json{{"platform", "windows"},
-                     {"version", MSIME_WINDOWS_VERSION},
-                     {"device", device.empty() ? nlohmann::json(nullptr) : nlohmann::json(device)},
-                     {"system", system.empty() ? nlohmann::json(nullptr) : nlohmann::json(system)},
-                     {"edition", MSIME_EDITION_ID}}
-          .dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-  const auto raw = msime::host_api::own_string(msime_client_client_agent(
-      reinterpret_cast<const uint8_t *>(request.data()), request.size()));
-  if (!raw)
-    return {};
-  const auto document = nlohmann::json::parse(raw.get(), nullptr, false);
-  if (!document.is_object() || !document.value("ok", false) || !document.contains("value") ||
-      !document.at("value").is_string())
-    return {};
-  return document.at("value").get<std::string>();
-}
-// 使用统计的目录：msime::telemetry::default_directory() 是 %LOCALAPPDATA%\MSIME，本版本换成同级的用户目录（版本表 platforms.windows.user_data_directory），各版本的安装 id 和事件队列互不相干。full 的目录名就是 MSIME，结果与 default_directory() 相同。
-std::filesystem::path edition_telemetry_directory() {
-  const auto shared = msime::telemetry::default_directory();
-  if (shared.empty())
-    return {};
-  return shared.parent_path() / MSIME_EDITION_USER_DATA_DIRECTORY;
 }
 std::string read_document(const std::filesystem::path &path) {
   const auto document = msime::windows::read_private_file(path, kMaxConfigBytes);
@@ -577,38 +445,6 @@ std::string running_scheme(
           preferences.value("last_chinese_scheme", std::string("quanpin")),
           installed)));
 }
-// 托盘主题页选中的主题，通过带版本的存储写进 global_theme，和 macOS 输入菜单的 selectGlobalTheme: 一样只换这一项；自定义主题的底色和皮肤包留给设置页。已经是这个主题时不写。
-bool store_global_theme(const std::filesystem::path &directory,
-                        const std::string &theme) {
-  try {
-    const auto root = directory.u8string();
-    auto loaded = msime::host_api::own_string(msime_client_load_preferences(
-        reinterpret_cast<const uint8_t *>(root.data()), root.size()));
-    if (!loaded)
-      return false;
-    const auto response = nlohmann::json::parse(loaded.get());
-    if (!response.value("ok", false) || !response.at("value").is_object())
-      return false;
-    auto snapshot = response.at("value");
-    const auto revision = snapshot.at("revision").get<uint64_t>();
-    auto &preferences = snapshot.at("preferences");
-    if (preferences.contains("global_theme") &&
-        preferences.at("global_theme") == theme)
-      return true;
-    preferences["global_theme"] = theme;
-    const auto serialized = snapshot.dump();
-    auto saved = msime::host_api::own_string(msime_client_save_preferences(
-        reinterpret_cast<const uint8_t *>(root.data()), root.size(), revision,
-        reinterpret_cast<const uint8_t *>(serialized.data()), serialized.size()));
-    if (!saved)
-      return false;
-    const auto saved_response = nlohmann::json::parse(saved.get());
-    return saved_response.value("ok", false) &&
-           saved_response.at("value").is_object();
-  } catch (...) {
-    return false;
-  }
-}
 // The stored preferences the tray card shows. The preference monitor publishes them and the UI thread reads them whenever the card is built.
 struct TrayMenuPreferences {
   bool translations = true;
@@ -662,40 +498,6 @@ msime::windows::InputStateHudText scheme_hud(const TrayMenuPreferences &preferen
     return {title, L"输入方案：" + title};
   }
   return {};
-}
-// 候选右键菜单「加入生词本」：在工作线程上把候选原文、显示着的释义和读音交给共享层，返回它答的那句提示（UTF-8 转成宽字符），交不出去或存储出错时返回「无法加入生词本」。释义怎么变成卡片、提示怎么说都在 `msime_client_personal_wordbook_add`。
-std::wstring add_to_personal_wordbook(const std::filesystem::path &state_root,
-                                      const msime::windows::CandidateWindow::PersonalWordbookRequest &request) {
-  const std::wstring failed = L"无法加入生词本";
-  std::string body;
-  try {
-    body = nlohmann::json{{"directory", state_root.u8string()},
-                          {"candidate", request.candidate},
-                          {"gloss", request.gloss},
-                          {"pronunciation", request.pronunciation}}
-               .dump();
-  } catch (const nlohmann::json::exception &) {
-    return failed; // 候选或释义不是有效的 UTF-8。
-  }
-  auto reply = msime::host_api::own_string(msime_client_personal_wordbook_add(
-      reinterpret_cast<const uint8_t *>(body.data()), body.size()));
-  if (!reply)
-    return failed;
-  const auto envelope = nlohmann::json::parse(reply.get(), nullptr, false);
-  if (!envelope.is_object() || envelope.value("ok", false) != true || !envelope.contains("value") ||
-      !envelope.at("value").is_object() || !envelope.at("value").contains("notice") ||
-      !envelope.at("value").at("notice").is_string())
-    return failed;
-  const auto notice = envelope.at("value").at("notice").get<std::string>();
-  const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, notice.data(),
-                                        static_cast<int>(notice.size()), nullptr, 0);
-  if (count <= 0)
-    return failed;
-  std::wstring text(static_cast<size_t>(count), L'\0');
-  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, notice.data(),
-                          static_cast<int>(notice.size()), text.data(), count) != count)
-    return failed;
-  return text;
 }
 // Map the shared preferences onto the settings the TIP keeps in its own
 // globals. The TIP consumes every one of these, but nothing ever sent them, so
@@ -934,25 +736,12 @@ const char *foreground_presentation_name(
 }
 } // namespace
 int wmain(int argc, wchar_t **argv) {
-  // 先析构会话和翻译 worker，再等待共享模型释放；不在 DLL 加载器锁内等待。
-  struct EmbeddedTranslationShutdown {
-    ~EmbeddedTranslationShutdown() { msime_client_local_translation_shutdown(); }
-  } embedded_translation_shutdown;
-
   // 登录任务的默认 Priority 7 把 CPU 调度类和内存优先级一起压低，看门狗和它拉起的
   // Server 都继承这个状态；TSF 拉起、手工启动和以后的拉起路径也可能带进来。复位放在
   // 任何业务线程创建之前，失败只记一行，不阻止启动。
   const auto process_priority =
       msime::windows::restore_interactive_process_priority();
   msime::windows::compat::initialize_process_dpi();
-  // Before any thread exists: libcurl's global init is not thread-safe, and the online workers use it.
-  curl_global_init(CURL_GLOBAL_DEFAULT);
-  // Crash capture only writes this session's crash record to disk, and only once telemetry::begin armed it with the user's consent; the next start reports it.
-  std::set_terminate([] {
-    msime::telemetry::record_terminate();
-    std::abort();
-  });
-  msime::telemetry::install_crash_handlers();
   using namespace msime::windows;
   const auto launch = parse_server_arguments(argc, argv);
   attach_launching_console(launch);
@@ -1028,7 +817,6 @@ int wmain(int argc, wchar_t **argv) {
       diagnostic_log.server("Failed to restore MEMORY_PRIORITY_NORMAL: error " +
                             std::to_string(process_priority.memory_error));
     // 脚本插件只在 Server 里运行；TIP 和 Server 共用同一份宿主 DLL，但 TIP 从不调用它（scripts/test-script-plugin-hosts.py）。开发构建和 release 构建一样打开：授权由设置应用（platforms/windows/settings）的授权页写入，那里写明了同一用户下的其他程序能伪造授权；提权窗口（ELEVATED）里从不运行脚本（msime_client.h）。
-    msime_client_scripts_enable(true);
     // Operator notices go to the terminal of a preview run and, when the server switch is on, to the diagnostic file - the only place a managed Server's notices can be read.
     const auto notice = [&diagnostic_log](const std::string &line) {
       std::cerr << line << "\n";
@@ -1060,33 +848,6 @@ int wmain(int argc, wchar_t **argv) {
       return 0;
     startup_stage = "services";
     apply_diagnostic_log(diagnostic_log, prepared.at("value").at("preferences"));
-    // Usage reporting, on unless the user turned usage_reporting off: one session per Server process, kept in this Windows user's %LOCALAPPDATA%\MSIME. begin closes the previous session (session_crash only when it left a crash record) and queues today's active; it is file I/O only. Delivery runs on a thread that is never joined, so an unreachable endpoint cannot delay the Server and exiting mid-request only leaves the events queued for the next start.
-    startup_stage = "telemetry";
-    std::optional<msime::telemetry::ConsentObserver> reporting_observer;
-    if (const auto telemetry_directory = edition_telemetry_directory(); !telemetry_directory.empty()) {
-      // 持久偏好与队列绑定同一授权代次；观察不等待网络，迟到的发布回调不覆盖当前授权。
-      msime::telemetry::begin({"windows", MSIME_WINDOWS_VERSION, telemetry_directory, std::nullopt, config.state_root});
-      reporting_observer.emplace();
-      msime::telemetry::start_flushing();
-    }
-    // The user's anonymous MSIME account is registered on the first run after install, as on every other platform; once anonymous-session.json exists this is a file read. It runs off the main thread for the same reason as the telemetry event, and a failure (offline, rate limited) is simply retried on the next start.
-    startup_stage = "anonymous_account";
-    if (const auto account = anonymous_account_directory(); production && !account.empty()) {
-      // 选了「水杉账号」时候选释义用这个目录里的会话：设置应用登录的账号优先，没有登录时用这里注册的匿名账号。
-      const auto utf8_directory = account.u8string();
-      const std::string directory(utf8_directory.begin(), utf8_directory.end());
-      const auto agent = windows_client_agent();
-      msime::windows::TranslationWorker::set_account_directory(directory, agent);
-      std::thread([directory, agent] {
-        auto request = nlohmann::json{{"directory", directory}};
-        if (!agent.empty())
-          request["client_agent"] = agent;
-        const auto body = request.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-        auto result = msime::host_api::own_string(
-            msime_client_ensure_anonymous_account_with_agent(
-                reinterpret_cast<const uint8_t *>(body.data()), body.size()));
-      }).detach();
-    }
     diagnostic_log.server(std::string(production ? "Production" : "Preview") +
                           " Server starting");
     startup_stage = "preferences";
@@ -1122,13 +883,7 @@ int wmain(int argc, wchar_t **argv) {
     // 徽标画不画 logo 单独跟着 `show_app_logo` 走，不借工具栏那份设置：工具栏尺寸越界时那份设置不发布，logo 不该跟着丢。
     auto input_mode_hud_logo = std::make_shared<std::atomic<bool>>(
         hud_show_app_logo(prepared.at("value").at("preferences")));
-    // "follow" 取全局的 `theme`，它的 "system" 再交给 Windows 的应用模式。
-    const auto followed_surface_theme = [&] {
-      const auto &stored = prepared.at("value").at("preferences");
-      return surface_theme_mode("follow", stored.value("theme", std::string("dark")));
-    };
-    auto menu_theme = std::make_shared<std::atomic<SurfaceThemeMode>>(followed_surface_theme());
-    auto toolbar_theme = std::make_shared<std::atomic<SurfaceThemeMode>>(followed_surface_theme());
+    // 工具栏、托盘菜单、语音浮层一律跟随系统颜色模式。
     auto toolbar_enabled = std::make_shared<std::atomic<bool>>(
         prepared.at("value").at("preferences")
             .value("floating_toolbar", nlohmann::json::object())
@@ -1146,18 +901,9 @@ int wmain(int argc, wchar_t **argv) {
     // 「输入时显示双拼键位提示」（共享偏好 `shuangpin_keymap_hint`，没选过时文档里没有这一项，按关处理），同样经原子量发布，改了设置不用重启 Server。
     auto shuangpin_keymap_enabled = std::make_shared<std::atomic<bool>>(
         shuangpin_keymap_preference(prepared.at("value").at("preferences")));
-    // 按键音或打字特效开着没有：Aux 管道的 KeySound 只在开着时回 "OK"，同样经原子量发布。
-    auto typing_feedback = std::make_shared<std::atomic<bool>>(
-        typing_feedback_wanted(prepared.at("value").at("preferences")));
     // 「鼠标滚轮翻页」同样经原子量发布，候选窗每轮取用，改了设置不用重启 Server。
     auto candidate_mouse_wheel = std::make_shared<std::atomic<bool>>(
         config.navigation.mouse_wheel);
-    // 更新通道（共享偏好 `update_channel`，归一成 stable、beta、nightly），后台更新检查的线程每次调用前读它，同样随偏好发布更新。
-    auto update_channel = std::make_shared<std::pair<std::mutex, std::string>>();
-    update_channel->second = update_channel_preference(prepared.at("value").at("preferences"));
-    // 「我的词条」经 WebDAV 网盘的自动同步（DictionarySyncWorker.h）：先建出来接住偏好里网盘配置的变化和候选窗口删词的通知，受管理的 Server 进入消息循环之前才起工作线程。
-    auto dictionary_sync = std::make_shared<DictionarySyncWorker>(
-        dictionary_sync_configured(prepared.at("value").at("preferences")));
     // The TSF Ctrl+Shift+F route is delivered through the same bounded worker
     // as the toolbar button. It must exist before WindowsServer construction:
     // a newly connected client may dispatch its first key immediately.
@@ -1222,13 +968,6 @@ int wmain(int argc, wchar_t **argv) {
             stored_candidate_layout.reserved_gloss_lines,
             stored_candidate_layout.show_page_number}
             .encode());
-    // Keep the native listener on the same file used by the shared desktop
-    // shell; this is the cross-process handoff for the clipboard panel.
-    ClipboardHistory clipboard_history(config.state_root / "clipboard_history.json");
-    clipboard_history.set_enabled(
-        prepared.at("value").at("preferences").value("clipboard_history", false));
-    clipboard_history.set_limit(
-        prepared.at("value").at("preferences").value("clipboard_history_limit", 50u));
     WindowsServerOptions options;
     options.pipes.names = production ? production_pipe_names()
                                      : config.pipe_names();
@@ -1274,18 +1013,16 @@ int wmain(int argc, wchar_t **argv) {
     options.preferences_directory = config.state_root.u8string();
     options.preferences_published =
         [&, traditional_output,
-         toolbar_enabled, follow_cursor, game_anchor_top, shuangpin_keymap_enabled, typing_feedback, candidate_mouse_wheel, candidate_fonts, candidate_style,
-         toolbar_theme, menu_theme, mode_scope_global, app_mode_rules,
+         toolbar_enabled, follow_cursor, game_anchor_top, shuangpin_keymap_enabled, candidate_mouse_wheel, candidate_fonts, candidate_style,
+         mode_scope_global, app_mode_rules,
          input_mode_hud_enabled, input_mode_hud_logo, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
          tsf_config_revision, candidate_theme, toolbar_settings,
-         language_dictionaries, update_channel, dictionary_sync](const PreferenceSnapshot &snapshot) {
+         language_dictionaries](const PreferenceSnapshot &snapshot) {
           const auto preferences =
               nlohmann::json::parse(snapshot.serialized()).at("preferences");
           candidate_theme->publish(preferences);
           apply_diagnostic_log(diagnostic_log, preferences);
-          // Turning reporting off clears what is queued and disarms crash capture at once; turning it on starts a session as a Server start would.
-          msime::telemetry::set_enabled(msime::windows::usage_reporting_enabled(preferences));
           if (auto settings = floating_toolbar_settings(preferences))
             toolbar_settings->publish(snapshot.revision(), *settings);
           if (auto fonts = candidate_font_settings(preferences))
@@ -1297,10 +1034,6 @@ int wmain(int argc, wchar_t **argv) {
           traditional_output->store(
               preferences.value("traditional_chinese_output", false),
               std::memory_order_release);
-          clipboard_history.set_enabled(
-              preferences.value("clipboard_history", false));
-          clipboard_history.set_limit(
-              preferences.value("clipboard_history_limit", 50u));
           mode_scope_global->store(
               preferences.value("ime_mode_scope", std::string("app")) ==
                   "global",
@@ -1313,18 +1046,6 @@ int wmain(int argc, wchar_t **argv) {
           input_mode_hud_enabled->store(preferences.value("input_mode_hud", true),
                                         std::memory_order_release);
           input_mode_hud_logo->store(hud_show_app_logo(preferences), std::memory_order_release);
-          {
-            auto channel = update_channel_preference(preferences);
-            std::lock_guard<std::mutex> lock(update_channel->first);
-            update_channel->second = std::move(channel);
-          }
-          // 设置窗口测试连接通过并保存了网盘、或者清掉了它：自动同步跟着开始或停下。
-          dictionary_sync->configure(dictionary_sync_configured(preferences));
-          // 工具栏、托盘菜单和语音浮层跟随颜色模式，只看全局的 `theme`（见上面三个原子量的说明）。语音浮层在后面才建，所以经原子量交给循环去套用。
-          const auto surface_mode =
-              surface_theme_mode("follow", preferences.value("theme", std::string("dark")));
-          menu_theme->store(surface_mode, std::memory_order_release);
-          toolbar_theme->store(surface_mode, std::memory_order_release);
           // Publish the TSF-local settings; the loop pushes them to the
           // focused TIP, since the server is constructed after this handler.
           {
@@ -1355,16 +1076,13 @@ int wmain(int argc, wchar_t **argv) {
               std::memory_order_release);
           shuangpin_keymap_enabled->store(shuangpin_keymap_preference(preferences),
                                           std::memory_order_release);
-          typing_feedback->store(typing_feedback_wanted(preferences),
-                                 std::memory_order_release);
           candidate_mouse_wheel->store(
               preferences.value("navigation", nlohmann::json::object())
                   .value("mouse_wheel", false),
               std::memory_order_release);
+        };
     auto session_options = prepared.at("value");
-    name_builtin_sound_packs(session_options, config.state_root);
     name_builtin_helpcodes(session_options, config.state_root);
-    name_official_plugin_packs(session_options, executable_directory());
     name_rerank_models(session_options, executable_directory());
     startup_stage = "pipe_server";
     SessionPump::Presentation pump_presentation;
@@ -1427,23 +1145,6 @@ int wmain(int argc, wchar_t **argv) {
       // 补查构造期间已完成、当时尚无回调接收的偏好写入。
       wake_preferences->second();
     }
-    ClipboardMonitor clipboard_monitor(
-        clipboard_history, [&](std::string text) {
-          const auto request = nlohmann::json{
-              {"directory", config.state_root.u8string()},
-              {"text", normalize_clipboard_text(std::move(text))}}.dump();
-          // The shared writer preserves pinned entries, timestamps and the
-          // preference/history locking used by the Tauri panel.
-          auto reply = msime::host_api::own_string(
-              msime_client_capture_clipboard_history(
-                  reinterpret_cast<const uint8_t *>(request.data()), request.size()));
-        });
-    // Clipboard history is an optional convenience, so a monitor that cannot
-    // start leaves it inert rather than taking the IME down with it. Failing
-    // here used to cost the user all text input because a message-only window
-    // or a class registration failed.
-    if (!clipboard_monitor.start())
-      notice("Clipboard history unavailable; continuing without it");
     CandidateClickWorker clicks([&](const CandidateClick &click) {
       if (click.action == CandidateAction::Select) {
         if (server.request_selection(click.lease, click.session,
@@ -1459,9 +1160,6 @@ int wmain(int argc, wchar_t **argv) {
           click.translation_page, click.action, click.position);
       if (acted == CandidateActionRequestResult::Failed)
           throw std::runtime_error("Candidate action failed");
-      // 删掉的可能是「我的词条」里的词：让自动同步记一次本机改动（只记录、不联网），不在这个线程上等它。
-      if (acted == CandidateActionRequestResult::Sent && click.action == CandidateAction::Remove)
-        dictionary_sync->note_local_change();
     });
     CandidatePageWorker pages([&](const CandidatePage &page) {
       if (server.request_page(page) == CandidatePageRequestResult::Failed)
@@ -1518,18 +1216,6 @@ int wmain(int argc, wchar_t **argv) {
               hud_feedback.publish(dedicated_english_hud(request.enabled), request.lease);
           }
         });
-    // 候选右键菜单「加入生词本」：要取词书目录的文件锁、读写生词本，所以不在候选窗的 UI 线程上做。一次只做一个，用户连点时多出来的那几下丢掉。提示回到主循环，和输入状态的提示走同一个 HUD。声明在 candidates 之前，后于它析构：候选窗停下以后不会再交东西过来。
-    SingleClickWorker<CandidateWindow::PersonalWordbookRequest> personal_wordbook(
-        [&hud_feedback, directory = config.state_root](const CandidateWindow::PersonalWordbookRequest &request) {
-          const auto notice = add_to_personal_wordbook(directory, request);
-          hud_feedback.publish({notice, notice, true});
-        });
-    // 候选右键菜单「朗读」：SAPI 读完才返回，所以不在候选窗的 UI 线程上做。一次只读一个，正在读时多点的那几下丢掉；没有可用的声音时提示走同一个 HUD。声明位置与 personal_wordbook 相同的理由。
-    SingleClickWorker<std::string> read_aloud(
-        [&hud_feedback](const std::string &text) {
-          if (const auto problem = msime::windows::speak_english(text))
-            hud_feedback.publish({*problem, *problem, true});
-        });
     startup_stage = "candidate_window";
     DesktopCandidateSettings candidate_settings;
     // 启动配置里没有字重，先按常规画；读到偏好后字重随 candidate_font_settings 一起发过来。
@@ -1545,9 +1231,7 @@ int wmain(int argc, wchar_t **argv) {
         [&](const CandidatePage &page) { (void)pages.submit(page); },
         [&](const CandidatePresentation &value) { server.candidate_rendered(value.lease, value.render_serial); },
         [&](const FocusLease &lease, bool open) { server.set_candidate_expansion(lease, open); },
-        [&](const FocusLease &lease) { return server.candidate_lease_current(lease); },
-        [&](const CandidateWindow::PersonalWordbookRequest &request) { (void)personal_wordbook.submit(request); },
-        {msime::read_aloud::text_for, [&](const std::string &text) { (void)read_aloud.submit(text); }}});
+        [&](const FocusLease &lease) { return server.candidate_lease_current(lease); }});
     // 空格、数字键和点选的渲染屏障要等回执时叫醒候选窗立即绘制，屏障的 30 毫秒只花在真正的绘制上，不花在两级 16 毫秒的轮询上（#9519）。守卫声明在 candidates 之后、先于它析构：撤掉之后 Server 不会再调用这个回调。
     server.set_candidate_render_request([&candidates] { candidates.wake(); });
     struct CandidateRenderRequestGuard {
@@ -1558,27 +1242,16 @@ int wmain(int argc, wchar_t **argv) {
     startup_stage = "candidate_theme";
     auto current_candidate_theme = candidate_theme_values(
         prepared.at("value").at("preferences"));
-    std::map<std::string, CandidateThemeResolution> resolved_themes;
-    // Package assets by id, read from the catalog once per package and forgotten with the resolved themes.
-    std::map<std::string, msime::windows::CandidateSkinAssets> skin_assets;
-    auto package_assets = [&](const std::string &id)
+    // 主题与皮肤已移除：界面统一使用原生配色，不再向共享层解析。
+    auto package_assets = [](const std::string &)
         -> const msime::windows::CandidateSkinAssets & {
-      auto found = skin_assets.find(id);
-      if (found == skin_assets.end())
-        found = skin_assets.emplace(id, resolve_skin_assets(config.skin_directory, id))
-                    .first;
-      return found->second;
+      static const msime::windows::CandidateSkinAssets empty;
+      return empty;
     };
-    auto resolved_theme = [&](bool dark, bool horizontal,
-                              bool canvas_panel_drawn = false) -> const CandidateThemeResolution & {
-      const auto request = candidate_theme_request(current_candidate_theme, dark, horizontal,
-                                                   config.skin_directory, canvas_panel_drawn);
-      auto key = request.dump();
-      auto found = resolved_themes.find(key);
-      if (found == resolved_themes.end())
-        found = resolved_themes.emplace(std::move(key), resolve_theme(request))
-                    .first;
-      return found->second;
+    auto resolved_theme = [](bool, bool, bool = false)
+        -> const CandidateThemeResolution & {
+      static const CandidateThemeResolution empty;
+      return empty;
     };
     // The card's palette for a resolved theme: the shared resolution, with the package's extra slots (candidate_text, preedit, selected row, bar and menu colours) the resolution does not carry, under the user's pickers. 不画 canvas 面板的界面（工具条、菜单、语音浮层、双拼键位图，以及面板图解不出来的候选卡片）拿到的是共享 catalog 给 canvas 包的不透明 `canvas` 外观可读配色，与其他宿主相同。
     auto card_palette = [&](const CandidateThemeResolution &theme, bool dark) {
@@ -1623,7 +1296,6 @@ int wmain(int argc, wchar_t **argv) {
     uint64_t candidate_theme_generation = 0;
     uint64_t candidate_theme_check_at = 0;
     bool system_dark = system_prefers_dark();
-    SkinResourceRevision candidate_skin_revision;
     {
       const auto &theme =
           resolved_theme(config.dark_theme, config.horizontal_candidates);
@@ -1670,8 +1342,7 @@ int wmain(int argc, wchar_t **argv) {
         [&] { return server.mode_view(); },
         [&](const ModeClick &click) { (void)mode_clicks.submit(click); });
     // The toolbar follows the global theme in its own light/dark mode.
-    bool toolbar_dark_applied = !surface_theme_is_light(
-        toolbar_theme->load(std::memory_order_acquire), system_dark);
+    bool toolbar_dark_applied = system_dark;
     uint64_t toolbar_theme_applied = candidate_theme_generation;
     toolbar.set_palette(toolbar_surface_palette(toolbar_dark_applied));
     {
@@ -1802,11 +1473,8 @@ int wmain(int argc, wchar_t **argv) {
     menu_capabilities.cantonese = language_dictionaries.cantonese;
     menu_capabilities.zhuyin = language_dictionaries.zhuyin;
     menu_capabilities.stroke = language_dictionaries.stroke;
-    const auto themes = theme_catalog();
-    // 托盘主题页的行，目录在 Server 运行期间不变，读一次。
+    // 主题、皮肤和在线面板已移除，托盘只保留本地输入相关入口。
     std::vector<TrayMenuTheme> theme_rows;
-    for (auto &[id, title] : theme_catalog_entries(themes))
-      theme_rows.push_back({std::move(id), std::move(title)});
     // 托盘卡片和悬浮工具栏的两个弹出菜单（切换输入方案、右键实用菜单）共用这一个命令处理和这一份状态，所以同一行从哪里点都走同一条路径。
     const auto tray_command = [&](TrayMenuCommand command) -> bool {
           const auto command_foreground = reinterpret_cast<uintptr_t>(GetForegroundWindow());
@@ -1943,28 +1611,18 @@ int wmain(int argc, wchar_t **argv) {
               traditional_output->load(std::memory_order_acquire);
           // candidate_theme_values keeps global_theme only when it is a string.
           state.theme = current_candidate_theme.value("global_theme", std::string("system"));
-          state.theme_title = theme_catalog_title(themes, state.theme);
           state.themes = theme_rows;
           return state;
     };
-    // 托盘卡片另外带上今日待复习：只有卡片列「背单词」一行，悬浮工具栏的方案菜单也取 tray_state，不必为它读进度。候选窗开着就是在组字，这时不读也不列。
+    // 托盘卡片不再读取背单词进度。
     const auto tray_card_state = [&] {
           auto state = tray_state();
           const auto shown = server.candidate_view();
           state.composing = shown && shown->visible;
-          if (!state.composing && menu_capabilities.vocabulary_panel)
-            state.vocabulary_due = vocabulary_due_count(config.state_root, shell_directory);
           return state;
     };
     startup_stage = "tray_menu";
     TrayMenuWindow tray(menu_capabilities, tray_command, tray_card_state);
-    // 主题页的一行写存储的 global_theme；偏好监视器随后把新主题发布给候选窗、工具栏和这张卡片。只接受目录里有的主题。
-    tray.set_theme_action([&](const std::string &theme) {
-      const bool listed = std::any_of(
-          theme_rows.begin(), theme_rows.end(),
-          [&](const TrayMenuTheme &row) { return row.id == theme; });
-      return listed && store_global_theme(config.state_root, theme);
-    });
     // 悬浮工具栏的两个弹出菜单，画法与托盘卡片相同。方案菜单只放「输入方案」那一组行，缺词典跑不起来的方案不列出，与 macOS 工具栏的方案菜单一样；右键菜单是 macOS 设置按钮的实用菜单。
     TrayMenuWindow scheme_menu(
         [&] { return tray_menu_scheme_items(menu_capabilities, tray_state(), true); },
@@ -1982,8 +1640,7 @@ int wmain(int argc, wchar_t **argv) {
     ToolbarPopup scheme_popup{scheme_menu};
     ToolbarPopup utility_popup{utility_menu};
     // The menu follows the global theme in its own light/dark mode, like the toolbar.
-    bool menu_dark_applied = !surface_theme_is_light(
-        menu_theme->load(std::memory_order_acquire), system_dark);
+    bool menu_dark_applied = system_dark;
     uint64_t menu_theme_applied = candidate_theme_generation;
     tray.set_palette(tray_menu_palette(surface_palette(menu_dark_applied)));
     // 再按一次打开它的按钮就收起；刚被轮询收起的不立刻重开。打开时取菜单当前的明暗配色，另一个弹出菜单和托盘卡片先收起。
@@ -2036,14 +1693,6 @@ int wmain(int argc, wchar_t **argv) {
     // listener the tray menu - and with it every shared-shell entry - is
     // unreachable. A failure here costs the menu, never the IME.
     TrayMenuMailbox tray_mailbox;
-    // Both statistics sinks below answer from this, never from the store: a key batch split over several Aux messages would otherwise have each message wait on the previous one's detached write for the store lock, past the DLL's 150 ms answer window. Declared before the listener so it outlives every sink call.
-    const TypingStatisticsSwitch statistics_switch(
-        [directory = config.state_root.u8string()] {
-          return msime_client_typing_statistics_enabled(
-              reinterpret_cast<const uint8_t *>(directory.data()),
-              directory.size());
-        },
-        std::chrono::seconds(5));
     DWORD aux_error = ERROR_SUCCESS;
     const std::wstring aux_name =
         production ? FANY_IME_AUX_NAMED_PIPE : config.aux_pipe_name();
@@ -2084,57 +1733,10 @@ int wmain(int argc, wchar_t **argv) {
                      ? server.quiesce_dictionaries()
                      : server.resume_dictionaries();
         },
-        // Keys the TIP passed straight to the application - English mode, digits and punctuation the Engine declined - never reach a session, so the commit path cannot count them. The DLL batches them here instead. Refusing while statistics are off makes the DLL back off rather than keep sending characters nobody records.
-        [statistics_directory = config.state_root.u8string(),
-         &statistics_switch](const AuxTypingStatistics &batch) {
-          if (!statistics_switch.enabled())
-            return false;
-          const int wide_size = static_cast<int>(batch.characters.size());
-          const int size = WideCharToMultiByte(
-              CP_UTF8, WC_ERR_INVALID_CHARS, batch.characters.data(), wide_size,
-              nullptr, 0, nullptr, nullptr);
-          if (size <= 0)
-            return false;
-          std::string text(static_cast<size_t>(size), '\0');
-          if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-                                  batch.characters.data(), wide_size,
-                                  text.data(), size, nullptr, nullptr) != size)
-            return false;
-          // A milestone's jingle stays quiet behind a full-screen application, as every other effect sound does.
-          record_typing_statistics_async(
-              statistics_directory, text,
-              batch.english ? TypingSource::English : TypingSource::Unknown,
-              foreground_is_fullscreen(GetForegroundWindow()));
-          return true;
-        },
-        // Per-key press counts for the key heatmap. The DLL counts them because only it sees the scan code, and it buffers nothing until a probe is answered here, so refusing while statistics are off is what keeps every host process from counting at all. The ids are ASCII by the time the parser accepted them; which ones are canonical is the shared store's rule.
-        [statistics_directory = config.state_root.u8string(),
-         &statistics_switch](const AuxTypingKeys &batch) {
-          if (!statistics_switch.enabled())
-            return false;
-          if (batch.counts.empty())
-            return true;
-          // Narrowed unit by unit, which is lossless only because the parser admitted nothing but ASCII; constructing std::string from wide iterators narrows implicitly, and MSVC's /WX rejects that (C4244).
-          const auto ascii = [](const std::wstring &value) {
-            std::string narrow;
-            narrow.reserve(value.size());
-            for (const wchar_t unit : value)
-              narrow.push_back(static_cast<char>(unit));
-            return narrow;
-          };
-          std::map<std::string, uint64_t> keys;
-          for (const auto &[key, count] : batch.counts)
-            keys.emplace(ascii(key), count);
-          record_typing_keys_async(statistics_directory, ascii(batch.day), keys);
-          return true;
-        },
-        // TIP 交给应用的键：没有组字时的空格、回车、退格、数字这些不经过会话的按键路径，TIP 单独报来，排进输入队列出按键音、计入连击，不等它执行。按键音和打字特效都关着时不排、不回 "OK"，TIP 就停一阵不发。
-        [&server, typing_feedback](const AuxKeySound &key) {
-          if (!typing_feedback->load(std::memory_order_acquire))
-            return false;
-          server.passthrough_key(key.client_id, key.focus_token, key.key_class);
-          return true;
-        });
+        // 打字统计与按键音已移除：Aux 上相应的批次一律拒绝，DLL 会停止发送。
+        [](const AuxTypingStatistics &) { return false; },
+        [](const AuxTypingKeys &) { return false; },
+        [](const AuxKeySound &) { return false; });
     // The fifth pipe: TIP diagnostics. The TIP has always produced batches on
     // it; nothing ever listened, so enabling diagnostic logging produced
     // nothing at all. Session-less like the Aux endpoint, because a TIP that
@@ -2196,9 +1798,6 @@ int wmain(int argc, wchar_t **argv) {
                                  candidate.index, view->translation_page,
                                  CandidateAction::Remove) ==
                              CandidateActionRequestResult::Sent;
-        // 与候选菜单的删除相同，记一次「我的词条」的本机改动。
-        if (removed)
-          dictionary_sync->note_local_change();
         return removed;
       }
       }
@@ -2230,54 +1829,6 @@ int wmain(int argc, wchar_t **argv) {
     bool quns_cost_logged = false;
     uint64_t tsf_config_applied_revision = 0;
     uint64_t caps_lock_applied_revision = 0;
-    // 后台更新检查只在受管理的 Server 里做：预览实例是开发和测试用的，不该替用户联网，也不该弹通知。线程五分钟后第一次调用共享层，之后每小时一次（UpdateNotifier.h）；有新版本时弹一个临时的通知区域气泡，点它和托盘的「关于」一样打开设置窗口的「关于」页。记录放在本用户的目录（UpdateRecordDirectory.h）而不是状态根：安装后的状态根整台机器共用，几个用户共用一份「提醒过哪个构建」会让后登录的用户收不到通知。拿不到这个目录或建不出窗口时只记一条诊断，不影响输入。
-    startup_stage = "update_notifier";
-    std::optional<UpdateNotifier> update_notifier;
-    if (production) {
-      try {
-        const auto record_directory = msime::windows::update_record_directory();
-        if (record_directory.empty())
-          throw std::runtime_error("Update record directory unavailable");
-        UpdateNotifier::Options update_options;
-        const auto record_directory_utf8 = record_directory.u8string();
-        update_options.directory.assign(record_directory_utf8.begin(), record_directory_utf8.end());
-        update_options.version = MSIME_WINDOWS_VERSION;
-        update_options.edition = MSIME_EDITION_ID;
-        update_options.product_name = MSIME_EDITION_DISPLAY_NAME;
-        update_options.channel = [update_channel] {
-          std::lock_guard<std::mutex> lock(update_channel->first);
-          return update_channel->second;
-        };
-        update_options.open_about = [&] {
-          const auto request = shell_surface_request(TrayMenuCommand::OpenAbout);
-          return request && launch_shell(*request);
-        };
-        // 诊断日志有意不析构（见上面登记诊断出口处），工作线程在 Server 退出途中晚回来时写它也安全；不经过 notice，它是 wmain 里的局部变量。
-        update_options.log = [log = &diagnostic_log](const std::string &line) { log->server(line); };
-        update_notifier.emplace(std::move(update_options));
-      } catch (const std::exception &) {
-        update_notifier.reset();
-        notice("Update notifier unavailable; continuing without background update checks");
-      }
-    }
-    // 「我的词条」的自动同步同样只在受管理的 Server 里做（预览实例不替用户联网）。同步目录是本用户的 %LOCALAPPDATA%\<本版本的用户目录>\dictionary-sync（DictionarySyncDirectory.h），与设置窗口同一个，一个安装只有一份设备身份；不放状态根，那里整台机器共用、每个用户都能改。偏好里没配网盘时线程只是等着，不调用共享层。拿不到目录或起不了线程时只记一条诊断，不影响输入。
-    startup_stage = "dictionary_sync";
-    if (production) {
-      try {
-        const auto sync_directory = msime::windows::dictionary_sync_directory();
-        if (sync_directory.empty())
-          throw std::runtime_error("Dictionary sync directory unavailable");
-        DictionarySyncWorker::Options sync_options;
-        sync_options.host_options = prepared.at("value");
-        const auto sync_directory_utf8 = sync_directory.u8string();
-        sync_options.directory.assign(sync_directory_utf8.begin(), sync_directory_utf8.end());
-        // 诊断日志有意不析构（见上面登记诊断出口处），工作线程在 Server 退出途中晚回来时写它也安全。
-        sync_options.log = [log = &diagnostic_log](const std::string &line) { log->server(line); };
-        dictionary_sync->start(std::move(sync_options));
-      } catch (const std::exception &) {
-        notice("Dictionary sync unavailable; continuing without automatic dictionary sync");
-      }
-    }
     startup_stage = "message_loop";
     while (!stopping.load() && server.failure() == ControllerFailure::None &&
            !candidates.failed() && !clicks.failed() && !pages.failed() &&
@@ -2313,8 +1864,6 @@ int wmain(int argc, wchar_t **argv) {
       if (auto theme = candidate_theme->take()) {
         if (*theme != current_candidate_theme) {
           current_candidate_theme = std::move(*theme);
-          resolved_themes.clear();
-          skin_assets.clear();
           candidate_theme_dirty = true;
         }
       }
@@ -2324,14 +1873,8 @@ int wmain(int argc, wchar_t **argv) {
           theme_now >= candidate_theme_check_at) {
         candidate_theme_check_at = theme_now + 500;
         system_dark = system_prefers_dark();
-        // 被编辑的包重新解析：颜色经共享层，装饰图来自目录。浅色和深色两个槽位的包都监视，工具条、语音浮层和菜单按自己的明暗可能画其中任一个。
-        const bool skin_resources_changed = candidate_skin_revision.changed(
-            config.skin_directory,
-            candidate_theme_packages(current_candidate_theme));
-        if (skin_resources_changed) {
-          resolved_themes.clear();
-          skin_assets.clear();
-        }
+        // 皮肤包已移除，界面资源不再因目录内容变化而重新解析。
+        const bool skin_resources_changed = false;
         const bool dark =
             candidate_theme_dark(current_candidate_theme, system_dark);
         if (candidate_theme_dirty || skin_resources_changed || dark != candidate_dark_applied ||
@@ -2391,15 +1934,13 @@ int wmain(int argc, wchar_t **argv) {
         toolbar.set_settings(*settings);
       if (mode_hud)
         mode_hud->set_show_logo(input_mode_hud_logo->load(std::memory_order_acquire));
-      if (const bool dark = !surface_theme_is_light(
-              menu_theme->load(std::memory_order_acquire), system_dark);
+      if (const bool dark = system_dark;
           dark != menu_dark_applied || menu_theme_applied != candidate_theme_generation) {
         menu_dark_applied = dark;
         menu_theme_applied = candidate_theme_generation;
         tray.set_palette(tray_menu_palette(surface_palette(dark)));
       }
-      if (const bool dark = !surface_theme_is_light(
-              toolbar_theme->load(std::memory_order_acquire), system_dark);
+      if (const bool dark = system_dark;
           dark != toolbar_dark_applied || toolbar_theme_applied != candidate_theme_generation) {
         toolbar_dark_applied = dark;
         toolbar_theme_applied = candidate_theme_generation;
@@ -2570,9 +2111,7 @@ int wmain(int argc, wchar_t **argv) {
           // Sample Windows now rather than relying on the periodic candidate
           // theme check, so a menu opened immediately after a system theme
           // change never flashes the previous palette.
-          const bool dark = !surface_theme_is_light(
-              menu_theme->load(std::memory_order_acquire),
-              system_prefers_dark());
+          const bool dark = system_prefers_dark();
           if (dark != menu_dark_applied ||
               menu_theme_applied != candidate_theme_generation) {
             menu_dark_applied = dark;
@@ -2631,11 +2170,6 @@ int wmain(int argc, wchar_t **argv) {
                                       MWMO_INPUTAVAILABLE) == WAIT_FAILED)
         throw std::runtime_error("Candidate message wait failed");
     }
-    // 先停后台更新检查：它最多等两秒，正在联网时放手让线程自己结束，不拖住下面的停机。
-    if (update_notifier)
-      update_notifier->stop();
-    // 自动同步同理：正在联网时最多等两秒，之后放手。
-    dictionary_sync->stop();
     candidates.stop();
     for (auto &line : candidates.take_diagnostics())
       notice(std::move(line));
@@ -2659,8 +2193,6 @@ int wmain(int argc, wchar_t **argv) {
     mode_clicks.stop();
     english_reads.stop();
     english_switches.stop();
-    // Every way out of the message loop is a normal end of this session.
-    msime::telemetry::end();
     if (restart_requested.load()) {
       diagnostic_log.server("Server stopping: restart requested");
       return msime::windows::watchdog::restart_exit_code;

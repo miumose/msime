@@ -11,10 +11,7 @@ use crate::error::{EngineError, Result};
 use crate::helpcode::{
     compute_helpcodes, load_helpcode_keymap_with_fallback, HelpcodeKeymap, SharedKeymap,
 };
-use crate::japanese::romaji::romaji_display_reading_into;
-use crate::nine_key::KeyGrid;
 use crate::pinyin::glide::{GlideKeyboard, GlidePoint};
-use crate::touch::{KeyGeometry, KeyTouch, TouchTuning};
 use crate::types::{
     CandidateEdge, CandidateSource, CommandTableEntry, CommandTranslationQuery, FirstPageRows,
     KeyResult, LocalInputMode, MentionEntry, OnlineQuery, PluginCommand, PluginCommandQuery,
@@ -46,13 +43,6 @@ pub enum Command {
     ConversionRight = 14,
 }
 
-/// 当前唯一混合候选的输入身份及语言分段，不随候选下标建立平行向量。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MultilingualComposition {
-    pub raw_input: String,
-    pub conversion: crate::multilingual::Conversion,
-}
-
 /// 除可选的静态评分证据外，所有 `candidate_*` 向量必须与 `candidates` 等长，运行时才能同步重排。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EngineSnapshot {
@@ -62,33 +52,13 @@ pub struct EngineSnapshot {
     /// The non-letter characters `character` takes in this state (`SessionSnapshot::spelling_symbols`): send one of these as a character, never as punctuation.
     pub spelling_symbols: String,
     pub dedicated_english: bool,
-    /// 九键组码网格开着（`set_key_grid` 设成九键，或 `set_nine_key_enabled(true)`）；14 键下为假。引擎快照里没有这个标志，由这里转述。
-    pub nine_key: bool,
-    /// `set_key_grid` 设下的组码网格，`None` 是不用网格。九键和 14 键共用 `nine_key_*` 那几项。
-    pub key_grid: Option<KeyGrid>,
-    pub nine_key_spellings: Vec<String>,
-    /// `SessionSnapshot::nine_key_reading`.
-    pub nine_key_reading: String,
-    /// `SessionSnapshot::nine_key_single_character`.
-    pub nine_key_single_character: bool,
-    /// `SessionSnapshot::nine_key_strokes`.
-    pub nine_key_strokes: String,
-    /// `SessionSnapshot::grid_helpcode_available`.
-    pub grid_helpcode_available: bool,
-    /// `SessionSnapshot::grid_helpcode_display`.
-    pub grid_helpcode_display: String,
-    /// `SessionSnapshot::grid_helpcode_constrained`：候选是网格辅助码筛过的，runtime 不再跨行重排。
-    pub grid_helpcode_constrained: bool,
-    /// 这次组字是在九宫格（九键或 14 键）里打的，见 [`crate::Session::grid_composing`]。`key_grid` 开着时硬件键盘的字母照样走全拼 26 键，这一项分得清两者。
-    pub grid_composing: bool,
     /// 当前方案是双拼，且韵母或零声母编码用 `;` 作第二键：宿主把 `;` 当作字母键送给 Engine。字段名沿用微软双拼，是宿主已经在读的契约。
     pub microsoft_shuangpin: bool,
     /// 会话跑的双拼方案名（`xiaohe`、`custom` 等），任何时候都给出，九宫格组字时也一样：宿主拿它画键面、算键盘外观的缓存键。核心快照在九宫格组字时这一项留空（金样例按此冻结），门面不照抄它。
     pub shuangpin_profile: String,
     pub preedit: String,
-    /// The kana reading in Japanese, the composed Hangul in Korean, the converted text plus the pending bopomofo in Zhuyin, the stroke glyphs (一丨丿丶乛＊) in Stroke, else empty. In Stroke each glyph stands for one ASCII letter of `editing_text`, so `caret_position` also counts glyphs.
+    /// 拼音方案没有单独的读音行。
     pub reading: String,
-    /// 宿主在行内画的读音：日文罗马字组字（非本地模式、非英文）时末尾单个 `n` 还没定成ん，按微软、Google 日文输入法的样子留作字母（`kan` 画成 `かn`，`kann` 才是 `かん`）；其余情况与 `reading` 相同。`reading` 仍是确定（`CommitReading`）上屏的读音，宿主不经引擎结束组字区、且编辑器仍报告着组字区时，应把它换成 `reading` 再结束；确认不了组字区还在时只结束组字（规则见 `msime_client.h` 的 `View.display_reading`）。
     pub display_reading: String,
     pub editing_text: String,
     pub caret_position: usize,
@@ -96,16 +66,14 @@ pub struct EngineSnapshot {
     pub helpcode_trigger: Option<crate::HelpcodeTrigger>,
     /// 组字光标在 `preedit` 里的位置，按 Unicode 标量计：`caret_position` 是 `editing_text` 里的偏移，而 `preedit` 可能是分词或展开过的拼写（全拼 `ni'hao`、双拼「拼音分词」的 `shi'shi`），宿主画 `preedit` 时用这一项放光标，不要拿 `caret_position` 去数 `preedit` 的字母。两者没有可靠对应时在 `preedit` 末尾（见 `preedit_caret.rs`）。
     pub preedit_caret: usize,
+    /// 候选列表是否打开（注音、韩文汉字等需要先选读音的列表）。拼音方案里通常为假。
+    pub candidate_list_open: bool,
     pub segment_raw_boundaries: Vec<u64>,
     pub candidates: Vec<String>,
     pub candidate_codes: Vec<String>,
     pub scheme: u8,
-    pub answered_by_pinyin_fallback: bool,
-    pub wubi_unique_four_code: bool,
     pub candidate_annotations: Vec<String>,
     pub candidate_sources: Vec<u8>,
-    /// 必须按来源、原始输入和完整词面匹配后使用；没有混合行时为空。
-    pub multilingual_conversion: Option<MultilingualComposition>,
     pub candidate_positions: Vec<u8>,
     pub candidate_corrected: Vec<bool>,
     pub candidate_answers_key: Vec<bool>,
@@ -117,8 +85,6 @@ pub struct EngineSnapshot {
     pub candidate_touch_supported: Vec<bool>,
     /// 与候选同步排列：这一行是按首选规则坐上第一位的双拼触点纠错（`WordItem::confident_correction`），视图据此给它标 `Candidate::confident_correction`，宿主画强调色、读屏念「已纠正」。一行都没有时为空，没有触点的请求永远为空；本地模式和专用英文下也为空。
     pub candidate_confident_correction: Vec<bool>,
-    /// The scheme's openable candidate list is showing (the Korean Hanja list, the Zhuyin conversion list); candidates are its rows while it is.
-    pub candidate_list_open: bool,
     /// 整句改字时改好的整句，否则为空（`SessionSnapshot::conversion`）。
     pub conversion: String,
     /// 整句改字的光标在第几个字之前，按 `conversion` 的 Unicode 标量计。
@@ -159,29 +125,6 @@ pub struct Session {
     inner: crate::session::Session,
     options: EngineOptions,
     _thread_confined: PhantomData<Rc<()>>,
-}
-
-impl Session {
-    /// 显示候选仍与引擎原始候选同座时直接取反查码；身份变化时扫描已有候选缓存。
-    pub(crate) fn candidate_wubi_code_for_display_item(
-        &self,
-        index: usize,
-        item: &crate::types::WordItem,
-    ) -> Option<&str> {
-        self.inner
-            .candidate_wubi_code_at_if_item(index, item)
-            .or_else(|| self.inner.candidate_wubi_code_if_item(item))
-    }
-
-    /// 供已有宿主测试和按词入口使用的查码；不使用可能与显示列表错位的座位。
-    #[cfg(test)]
-    pub(crate) fn candidate_wubi_code_for_display(
-        &self,
-        _index: usize,
-        word: &str,
-    ) -> Option<&str> {
-        self.inner.candidate_wubi_code(word)
-    }
 }
 
 impl Session {
@@ -254,28 +197,6 @@ impl Session {
         let confident = value.local_mode == LocalInputMode::None
             && !value.dedicated_english
             && value.candidates.iter().any(|row| row.confident_correction);
-        let display_reading = if !value.scheme.draws_reading() {
-            String::new()
-        } else if value.scheme == SchemeType::JapaneseRomaji
-            && value.local_mode == LocalInputMode::None
-            && !value.dedicated_english
-        {
-            let mut reading = String::new();
-            romaji_display_reading_into(&value.raw_segmentation, &mut reading);
-            reading
-        } else {
-            value.normalized_segmentation.clone()
-        };
-        let multilingual_conversion = value.multilingual_conversion.and_then(|conversion| {
-            value
-                .candidates
-                .iter()
-                .find(|row| row.source == CandidateSource::Multilingual)
-                .map(|row| MultilingualComposition {
-                    raw_input: row.pinyin.to_string(),
-                    conversion,
-                })
-        });
         let segment_raw_boundaries = self.inner.segment_raw_boundaries();
         let preedit_caret = preedit_caret::preedit_caret(
             &value.editing_text,
@@ -288,29 +209,16 @@ impl Session {
             local_mode: value.local_mode.name().to_owned(),
             spelling_symbols: value.spelling_symbols,
             dedicated_english: value.dedicated_english,
-            nine_key: self.inner.key_grid() == Some(KeyGrid::NineKey),
-            key_grid: self.inner.key_grid(),
-            nine_key_spellings: value.nine_key_spellings,
-            nine_key_reading: value.nine_key_reading,
-            nine_key_single_character: value.nine_key_single_character,
-            nine_key_strokes: value.nine_key_strokes,
-            grid_helpcode_available: value.grid_helpcode_available,
-            grid_helpcode_display: value.grid_helpcode_display,
-            grid_helpcode_constrained: value.grid_helpcode_constrained,
-            grid_composing: self.inner.grid_composing(),
             microsoft_shuangpin: self.microsoft_shuangpin(),
             shuangpin_profile: self.inner.shuangpin_layout().kind.name().to_owned(),
             preedit: value.preedit,
-            display_reading,
-            reading: if value.scheme.draws_reading() {
-                value.normalized_segmentation
-            } else {
-                String::new()
-            },
+            display_reading: String::new(),
+            reading: String::new(),
             editing_text: value.editing_text,
             caret_position: value.caret_position,
             helpcode_trigger: value.helpcode_trigger,
             preedit_caret,
+            candidate_list_open: value.candidate_list_open,
             segment_raw_boundaries: segment_raw_boundaries
                 .into_iter()
                 .map(|boundary| boundary as u64)
@@ -318,11 +226,8 @@ impl Session {
             candidates: Vec::with_capacity(count),
             candidate_codes: Vec::with_capacity(count),
             scheme: value.scheme as u8,
-            answered_by_pinyin_fallback: value.answered_by_pinyin_fallback,
-            wubi_unique_four_code: value.wubi_unique_four_code,
             candidate_annotations: Vec::with_capacity(count),
             candidate_sources: Vec::with_capacity(count),
-            multilingual_conversion,
             candidate_positions: Vec::with_capacity(count),
             candidate_corrected: Vec::with_capacity(count),
             candidate_answers_key: Vec::with_capacity(count),
@@ -342,18 +247,12 @@ impl Session {
             } else {
                 Vec::new()
             },
-            candidate_list_open: value.candidate_list_open,
             conversion: value.conversion,
             conversion_focus_start: value.conversion_focus.0,
             conversion_focus_end: value.conversion_focus.1,
             caret_edit_suffix: value.caret_edit_suffix,
             caret_edit_prefix: value.caret_edit_prefix,
         };
-        // 五笔反查只服务五笔方案：混输拼音的候选虽然来自全拼，也一样附上五笔码；全拼和双拼方案本身不显示，那里的注释位留给辅助码和纠错提示。
-        let wubi_reverse_codes = value.local_mode == LocalInputMode::None
-            && !value.dedicated_english
-            && value.scheme == SchemeType::Wubi;
-        let wildcard_query = wubi_reverse_codes && self.inner.wubi_wildcard_query_active();
         let mut annotations = value.candidate_annotations.into_iter();
         for (index, candidate) in value.candidates.into_iter().enumerate() {
             let mut annotation = annotations
@@ -369,22 +268,6 @@ impl Session {
                 }
             }
             // 用户关掉「候选显示剩余编码」（`wubi_reverse_code` 为 false）时，五笔原生候选不附：宿主在没有剩余编码时退回显示这条注释，附了就成了关掉开关后剩余编码换成完整编码（#10790）。拼音来的候选（混输拼音和 `z` 临时拼音反查）照旧附：那是用拼音查五笔码的反查，不是剩余编码，开关打开时宿主也从来不给它们算剩余编码，而混输打开时没有 `z` 反查，打字时只剩这一条查码路径。`z` 通配查出的五笔候选也照旧附：用户正是不知道 `z` 那一位是什么才用通配，完整码就是答案；键入的码不是它的前缀，开关打开时宿主同样算不出剩余编码；通配打开时 `z` 反查也停用了。
-            let reverse_code = match candidate.scheme {
-                SchemeType::Wubi => self.options.wubi_reverse_code || wildcard_query,
-                SchemeType::Quanpin | SchemeType::Shuangpin => true,
-                _ => false,
-            };
-            if wubi_reverse_codes && reverse_code {
-                let code = self.candidate_wubi_code_for_display_item(index, &candidate);
-                if let Some(code) = code {
-                    if !annotation.contains(code) {
-                        if !annotation.is_empty() {
-                            annotation.push(' ');
-                        }
-                        annotation.push_str(code);
-                    }
-                }
-            }
             output.candidate_annotations.push(annotation);
             output.candidate_sources.push(candidate.source as u8);
             output
@@ -655,64 +538,14 @@ impl Session {
             .apply_online_candidates(&request, candidates, source))
     }
 
-    /// 九宫格组码到上限时，这一键能不能先选掉首选再接着打；见 `Session::grid_limit_pick_ready`。
-    pub fn grid_limit_pick_ready(&self, value: u8, grid_key: bool) -> bool {
-        self.inner.grid_limit_pick_ready(value, grid_key)
-    }
-
-    /// 由引擎判断第五码是否继续混输拼音，宿主不复制读音规则。
-    pub fn wubi_pinyin_continues(&self, value: u8, shift: bool) -> bool {
-        self.inner.wubi_pinyin_continues(value, shift)
-    }
-
-    /// 第五码顶字关掉、混输开着时，让下一个字母并进混输串；见 `Session::allow_wubi_mixed_extension`。
-    pub fn allow_wubi_mixed_extension(&mut self) -> bool {
-        self.inner.allow_wubi_mixed_extension()
-    }
-
-    /// 五笔拼音混输开着时，顶字关掉才有地方容纳第五个字母。
-    pub fn wubi_mixed_pinyin(&self) -> bool {
-        self.inner.wubi_mixed_pinyin()
-    }
-
     /// `CHARACTER_MUST_BE_ASCII` above 127.
     pub fn character(&mut self, value: u8, shift: bool) -> Result<EngineResult> {
         require_ascii(value, diagnostics::CHARACTER_MUST_BE_ASCII)?;
         Ok(result_for(self.inner.character(value, shift)))
     }
 
-    /// 下一次 `character` 的按下点，见 [`crate::Session::set_key_touch`]。
-    pub fn set_key_touch(&mut self, touch: Option<KeyTouch>) {
-        self.inner.set_key_touch(touch);
-    }
-
-    /// 宿主注册或清除的键位几何，见 [`crate::Session::set_key_geometry`]。
-    pub fn set_key_geometry(&mut self, geometry: Option<Arc<KeyGeometry>>) {
-        self.inner.set_key_geometry(geometry);
-    }
-
-    /// 按触点计价的参数，只给 Rust 侧的评测调参用，不经 FFI；见 [`crate::touch::TouchTuning`]。
-    pub fn set_touch_tuning(&mut self, tuning: TouchTuning) {
-        self.inner.set_touch_tuning(tuning);
-    }
-
     pub fn expand_initial_candidates(&mut self) -> Result<bool> {
         Ok(self.inner.expand_initial_candidates())
-    }
-
-    pub fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<()> {
-        self.set_key_grid(enabled.then_some(KeyGrid::NineKey))
-    }
-
-    /// 见 [`crate::Session::set_key_grid`]。快照的 `nine_key` 只在九键下为真。
-    pub fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<()> {
-        self.inner.set_key_grid(grid);
-        Ok(())
-    }
-
-    /// 14 键的一键，见 [`crate::Session::grid_key`]；不是当前网格的字母时不处理，状态不变。
-    pub fn grid_key(&mut self, letter: u8) -> Result<EngineResult> {
-        Ok(result_for(self.inner.grid_key(letter)))
     }
 
     /// 滑行的一笔，见 [`crate::Session::glide`]。
@@ -736,27 +569,6 @@ impl Session {
     /// 宿主编排不能替混合滑行选择默认候选。
     pub fn requires_candidate_selection(&self) -> bool {
         self.inner.requires_candidate_selection()
-    }
-
-    /// Out of range is unhandled.
-    pub fn choose_nine_key_spelling(&mut self, index: usize) -> Result<EngineResult> {
-        Ok(result_for(self.inner.choose_nine_key_spelling(index)))
-    }
-
-    /// 见 [`crate::Session::grid_helpcode`]。
-    pub fn grid_helpcode(&mut self, op: crate::GridHelpcodeOp) -> Result<EngineResult> {
-        Ok(result_for(self.inner.grid_helpcode(op)))
-    }
-
-    /// 见 [`crate::Session::set_nine_key_filter`]。
-    pub fn set_nine_key_filter(
-        &mut self,
-        single_character: bool,
-        strokes: &str,
-    ) -> Result<EngineResult> {
-        Ok(result_for(
-            self.inner.set_nine_key_filter(single_character, strokes),
-        ))
     }
 
     /// `CommitRaw` 与 `CommitRawWithoutLearning` 交给核心同名的命令：回车学英文词的策略在核心里（`SessionOptions::learn_typed_spellings_on_enter`，产品打开），门面只换编号。
@@ -910,11 +722,3 @@ fn online_request(
 
 #[path = "session/preedit_caret.rs"]
 mod preedit_caret;
-
-#[cfg(test)]
-#[path = "session/annotation_move_tests.rs"]
-mod annotation_move_tests;
-
-#[cfg(test)]
-#[path = "session/grid_annotation_tests.rs"]
-mod grid_annotation_tests;

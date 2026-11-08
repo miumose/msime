@@ -16,80 +16,6 @@
 #include "FullscreenForeground.h"
 
 namespace msime::windows {
-std::string
-FocusedSession::typing_statistics_directory(const std::string &options) {
-  try {
-    return nlohmann::json::parse(options).value("preferences_directory",
-                                                std::string{});
-  } catch (...) {
-    // Statistics are optional. A configuration this session already accepted
-    // must not be re-litigated here.
-    return {};
-  }
-}
-namespace {
-// Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
-void submit_typing_statistics_request(std::string request) {
-  try {
-    std::thread([payload = std::move(request)] {
-      try {
-        if (auto *raw = msime_client_typing_statistics(
-                reinterpret_cast<const uint8_t *>(payload.data()),
-                payload.size()))
-          msime::host_api::discard_string(raw);
-      } catch (...) {
-        // Best effort; text commitment has already happened.
-      }
-    }).detach();
-  } catch (...) {
-    // Thread exhaustion drops the record rather than the keystroke.
-  }
-}
-} // namespace
-void record_typing_statistics_async(const std::string &directory,
-                                    const std::string &text,
-                                    TypingSource source, bool quiet) {
-  if (directory.empty())
-    return;
-  const auto local = local_time_parts(std::time(nullptr));
-  if (!local)
-    return;
-  auto request = typing_statistics_record_request(
-      directory, text, source, local->day, local->hour, quiet);
-  if (request.empty())
-    return;
-  submit_typing_statistics_request(std::move(request));
-}
-void record_typing_keys_async(const std::string &directory,
-                              const std::string &day,
-                              const std::map<std::string, uint64_t> &keys) {
-  auto request = typing_statistics_record_keys_request(directory, day, keys);
-  if (request.empty())
-    return;
-  submit_typing_statistics_request(std::move(request));
-}
-std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
-  if (!composer_ || !composer_->has_pending())
-    return std::nullopt;
-  const auto &reply = composer_->pending();
-  if (!reply.committed_text || reply.committed_text->empty())
-    return std::nullopt;
-  return Commit{*reply.committed_text,
-                resolve_typing_source_from_transition(reply.source.transition),
-                transition_counts_as_typing(reply.source.transition)};
-}
-void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
-  if (!delivered || !delivered->typing)
-    return;
-  if (statistics_) {
-    statistics_(delivered->text, delivered->source);
-    return;
-  }
-  // 里程碑的成就音和上屏音守同一条规则：全屏应用在前台、或在密码框里时不响。用的是这次上屏之前报给核心的字段属性。
-  const bool quiet = (session_.field_traits() & (MSIME_TRAIT_FULLSCREEN | MSIME_TRAIT_SECURE)) != 0;
-  record_typing_statistics_async(statistics_directory_, delivered->text,
-                                 delivered->source, quiet);
-}
 void FocusedSession::check_thread() const {
   if (std::this_thread::get_id() != thread_)
     throw std::logic_error("Wrong focused session thread");
@@ -101,27 +27,10 @@ bool FocusedSession::prepared(const FocusLease &lease) const {
 }
 void FocusedSession::attach_online_query(
     const FocusLease &lease, std::optional<PendingReply> &reply) {
-  if (reply) {
-    reply->online_query = session_.online_query(lease.epoch);
-    reply->translation_query = session_.translation_query(lease.epoch);
-  }
+  (void)lease;
+  (void)reply;
 }
 
-std::optional<std::string> FocusedSession::ai_request(
-    const FocusLease &lease, const std::string &query) {
-  check_thread();
-  if (!prepared(lease) || query.empty())
-    return std::nullopt;
-  std::optional<std::string> result;
-  gate_.with_active(lease, [&] {
-    try {
-      result = session_.ai_request(lease.epoch, query);
-    } catch (...) {
-      result.reset();
-    }
-  });
-  return result;
-}
 std::optional<nlohmann::json>
 FocusedSession::dedicated_english(const FocusLease &lease, bool exit) {
   check_thread();
@@ -270,10 +179,7 @@ bool FocusedSession::confirm(const FocusLease &lease, uint64_t request) {
   check_thread();
   if (!prepared(lease))
     return false;
-  // Read before the acknowledgement, which clears the pending reply, and
-  // recorded only if it went through: a throw leaves the commit unconfirmed,
-  // and an unconfirmed commit is not in the document.
-  const auto delivered = pending_commit();
+  // Read before the acknowledgement, which clears the pending reply.
   const bool auto_commit = composer_->pending().worker.has_value();
   const bool confirmed = gate_.with_active(lease, [&] {
     composer_->confirm_delivery(client_, lease.epoch, request);
@@ -285,7 +191,6 @@ bool FocusedSession::confirm(const FocusLease &lease, uint64_t request) {
   if (confirmed) {
     if (auto_commit)
       continuation_hide_.arm(ContinuationHide::Clock::now());
-    record_commit(delivered);
   }
   return confirmed;
 }
@@ -399,7 +304,6 @@ bool FocusedSession::confirm_ui(const FocusLease &lease, uint64_t generation) {
   check_thread();
   if (!prepared(lease))
     return false;
-  const auto delivered = pending_commit();
   const bool confirmed = gate_.with_active(lease, [&] {
     composer_->confirm_ui_delivery(client_, lease.epoch, generation);
     if (preferences_retry_) {
@@ -407,8 +311,6 @@ bool FocusedSession::confirm_ui(const FocusLease &lease, uint64_t generation) {
       preferences_retry_.reset();
     }
   });
-  if (confirmed)
-    record_commit(delivered);
   return confirmed;
 }
 std::optional<PendingReply> FocusedSession::pending(const FocusLease &lease) {
@@ -547,65 +449,6 @@ FocusedSession::rerank_settled(const FocusLease &lease) {
   return result;
 }
 std::optional<nlohmann::json>
-FocusedSession::apply_cloud_response(const FocusLease &lease,
-                                     const std::string &query,
-                                     const std::string &body) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<nlohmann::json> result;
-  gate_.with_active(lease, [&] {
-    result = session_.apply_cloud_response(lease.epoch, query, body);
-  });
-  return result;
-}
-std::optional<nlohmann::json>
-FocusedSession::apply_ai_candidates(const FocusLease &lease,
-                                    const std::string &query,
-                                    const std::string &candidates) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<nlohmann::json> result;
-  gate_.with_active(lease, [&] {
-    result = session_.apply_ai_candidates(lease.epoch, query, candidates);
-  });
-  return result;
-}
-std::optional<nlohmann::json>
-FocusedSession::resolve_ai_candidates(const FocusLease &lease,
-                                      const std::string &query) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<nlohmann::json> result;
-  gate_.with_active(lease, [&] {
-    result = session_.resolve_ai_candidates(lease.epoch, query);
-  });
-  return result;
-}
-std::optional<std::string>
-FocusedSession::translation_query(const FocusLease &lease) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<std::string> result;
-  gate_.with_active(lease, [&] { result = session_.translation_query(lease.epoch); });
-  return result;
-}
-std::optional<nlohmann::json>
-FocusedSession::apply_translations(const FocusLease &lease, uint64_t generation,
-                                   const std::string &translations) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<nlohmann::json> result;
-  gate_.with_active(lease, [&] {
-    result = session_.apply_translations(lease.epoch, generation, translations);
-  });
-  return result;
-}
-std::optional<nlohmann::json>
 FocusedSession::update_preferences(const FocusLease &lease,
                                    const std::string &snapshot) {
   check_thread();
@@ -707,8 +550,7 @@ void FocusedSession::publish_commit_feedback(const std::optional<PendingReply> &
     publish_typing_effect(typing_effect_mark_commit(*effect));
 }
 void FocusedSession::publish_typing_effect_settings() {
-  TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
-  TypingEffectSignal::instance().publish_palette(session_.typing_effect_palette());
+  // 精简版不再读取核心的打字特效设置；信号保持默认值，候选窗因此不画特效。
 }
 bool FocusedSession::passthrough_key(uint64_t token, uint32_t key_class) {
   check_thread();

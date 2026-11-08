@@ -44,16 +44,6 @@ pub enum Action {
     RemoveCandidate(CandidateId),
     FixCandidatePosition(CandidateId, u8),
     ClearCandidatePosition(CandidateId),
-    ChooseNineKeySpelling(NineKeySpellingId),
-    /// 14 键的一键，`a`–`z` 里这一组的任一字母（宿主约定送首字母）。不在 14 键下时不处理。
-    GridKey(u8),
-    /// 十四／十八键网格辅助码：放下分隔符、追加整组或确定字母、清除（`msime_engine::Session::grid_helpcode`）。放下分隔符后 [`Action::GridKey`] 一律不处理，字母键改送 `GridHelpcodeOp::Group`（十八键双拼的横滑送 `Exact`）；整串解释仍走 [`Action::ChooseNineKeySpelling`]。
-    GridHelpcode(GridHelpcodeOp),
-    /// 九宫格候选的筛选：只留单字，以及首字笔顺的前缀（`hspnz`，空表示不按笔画）。没有九宫格组字时不处理。
-    SetNineKeyFilter {
-        single_character: bool,
-        strokes: String,
-    },
     /// 滑过字母键的一笔，用宿主自己的坐标。
     Glide {
         keyboard: Box<GlideKeyboard>,
@@ -82,8 +72,6 @@ pub enum Action {
 pub(crate) struct PhraseSelection {
     pub(crate) word_before: String,
     pub(crate) reading: String,
-    /// 选词时正在组字的网格；`None` 是 26 键组字。退格收回这次选词时按它把读音打回去：14 键的读音是组码字母，要从 `grid_key` 进，从 `character` 进会变成全拼 26 键的字母。
-    pub(crate) grid: Option<KeyGrid>,
 }
 
 pub struct Runtime<E: InputEngine = Session> {
@@ -202,12 +190,6 @@ pub struct Runtime<E: InputEngine = Session> {
     pub(crate) facts: DispatchFacts,
     /// `facts.selection` 那个座位上候选的文本，用引擎调用之前的快照记下；没有选择时为空。`DispatchFacts` 要保持 `Copy`，文本单独放在这里，缓冲区在调用之间复用。
     pub(crate) selected_text: String,
-    /// 混合行按语言段输出的简繁偏好与本次选择；普通候选保持原有宿主转换路径。
-    pub(crate) multilingual_output: (
-        bool,
-        msime_client_core::chinese_conversion::TraditionalVariant,
-    ),
-    pub(crate) selected_multilingual: Option<crate::multilingual::SelectedMultilingual>,
     /// 组字（预编辑、读音、光标、整句改字、暂存词段）每变一次加一。宿主在一次调用前后各读一次，不同就说明组字变了；只看 refresh 里的比较不够，暂存词段不经过引擎快照。
     pub(crate) composition_epoch: u64,
     /// 候选视图（列表、注释、来源、高亮、页、释义）每变一次加一。高亮移动和翻页在 refresh 之前就返回，所以单独计数。
@@ -221,9 +203,6 @@ pub struct Runtime<E: InputEngine = Session> {
     pub(crate) plugins: crate::transform::PluginState,
 }
 
-/// `SchemeType::Korean`: Hangul syllables that compose in the preedit, with no Chinese punctuation; the only candidates are the composing syllable's Hanja, in the Engine's table order, once the host asks for them.
-pub const KOREAN_SCHEME: u8 = SchemeType::Korean as u8;
-
 /// The traits of the scheme behind `scheme`, which the Engine reports as its `SchemeType` ordinal. Only the placeholder snapshot of a failed refresh carries an ordinal no scheme has; each caller decides what that placeholder means, the way the ordinal comparisons this replaces did.
 fn scheme_type(scheme: u8) -> Option<SchemeType> {
     SchemeType::from_u8(scheme)
@@ -233,23 +212,6 @@ fn scheme_type(scheme: u8) -> Option<SchemeType> {
 pub(crate) fn script_conversion(scheme: u8, local_mode: &str) -> bool {
     scheme_type(scheme).is_some_and(SchemeType::script_conversion_applies)
         && !matches!(local_mode, "unicode" | "temporary_japanese")
-}
-
-/// 「二三候选」键在这个方案的组字里能不能选候选。日文把 `;`/`'` 用在罗马字输入里（`n'` 打出ん）；
-/// 韩文、注音、越南文、藏文由宿主自己组字或自己开候选列表。与 Windows
-/// `SecondThirdCandidatePolicy.h` 的 `second_third_candidate_scheme` 同一张表：
-/// 方案号未知时不接管的两边都不算，照样接管。
-fn second_third_candidate_scheme(scheme: u8) -> bool {
-    !matches!(
-        scheme_type(scheme),
-        Some(
-            SchemeType::JapaneseRomaji
-                | SchemeType::Korean
-                | SchemeType::Zhuyin
-                | SchemeType::Vietnamese
-                | SchemeType::Tibetan
-        )
-    )
 }
 
 /// 微软双拼（及零声母编码用 `;` 的方案）把 `;` 当韵母 ing：光标前、自上一个 `'` 起的片段
@@ -328,7 +290,6 @@ pub struct SettledRerankRequest {
     model_epoch: Arc<()>,
     context: String,
     scheme: u8,
-    answered_by_pinyin_fallback: bool,
     rows: SettledRerankRows,
     reranker: Box<dyn CandidateScorer>,
 }
@@ -464,7 +425,7 @@ pub fn score_settled_rerank(mut request: SettledRerankRequest) -> SettledRerankS
             request.reranker.as_mut(),
             &request.context,
             request.scheme,
-            request.answered_by_pinyin_fallback,
+            false,
             &rows,
         )
     };
@@ -962,8 +923,7 @@ impl<E: InputEngine> Runtime<E> {
         }
         // 宿主显示页上的座位可能不在固定页里，普通选择只认固定页，所以按全部候选选择（同样核对代次与范围）。
         let shown = self.display_page_current();
-        self.wubi_candidate_shortcut(&action)
-            .or_else(|| self.second_third_candidate_shortcut(&action))
+        self.second_third_candidate_shortcut(&action)
             .map(|id| {
                 if shown {
                     Action::SelectAnyCandidate(id)
@@ -974,23 +934,8 @@ impl<E: InputEngine> Runtime<E> {
             .unwrap_or(action)
     }
 
-    fn wubi_candidate_shortcut(&self, action: &Action) -> Option<CandidateId> {
-        if !self.snapshot_valid
-            || self.cached.scheme != SchemeType::Wubi as u8
-            || self.cached.dedicated_english
-            || self.cached.local_mode != "none"
-            || self.cached.editing_text.is_empty()
-        {
-            return None;
-        }
-        let value = match action {
-            Action::Character { value, .. }
-            | Action::Punctuation(value)
-            | Action::PunctuationAscii(value) => *value,
-            _ => return None,
-        };
-        let slot = self.wubi_candidate_selection.slot(value)?;
-        self.page_seat_candidate(slot)
+    fn wubi_candidate_shortcut(&self, _action: &Action) -> Option<CandidateId> {
+        None
     }
 
     /// 宿主报出这一代实际显示的候选座位：选词快捷键与翻译查询都按看得见的这一组，空列表清掉。
@@ -1041,17 +986,13 @@ impl<E: InputEngine> Runtime<E> {
         })
     }
 
-    /// 通用「二三候选」键：`;` 选当前页第二个、`'` 选第三个。边界与 `wubi_candidate_shortcut`
-    /// 相同（快照有效、组字中、无本地模式、非英文模式），方案与输入排除照 Windows
-    /// `SecondThirdCandidatePolicy.h` 的 `second_third_candidate_scheme` 与
-    /// `second_third_candidate_engine_input`。
+    /// 通用「二三候选」键：`;` 选当前页第二个、`'` 选第三个。
     fn second_third_candidate_shortcut(&self, action: &Action) -> Option<CandidateId> {
         if !self.second_third_candidate.enabled
             || !self.snapshot_valid
             || self.cached.dedicated_english
             || self.cached.local_mode != "none"
             || self.cached.editing_text.is_empty()
-            || !second_third_candidate_scheme(self.cached.scheme)
         {
             return None;
         }
@@ -1247,8 +1188,6 @@ impl<E: InputEngine> Runtime<E> {
             phrase_selections: Vec::new(),
             facts: DispatchFacts::default(),
             selected_text: String::new(),
-            multilingual_output: (false, Default::default()),
-            selected_multilingual: None,
             composition_epoch: 0,
             candidates_epoch: 0,
             #[cfg(any(
@@ -1480,7 +1419,6 @@ impl<E: InputEngine> Runtime<E> {
         let generation = self.generation;
         let context = self.ai_context.clone();
         let scheme = self.cached.scheme;
-        let answered_by_pinyin_fallback = self.cached.answered_by_pinyin_fallback;
         let texts = self.cached.candidates.clone();
         let sources = self.cached.candidate_sources.clone();
         let answers_key = self.cached.candidate_answers_key.clone();
@@ -1497,7 +1435,6 @@ impl<E: InputEngine> Runtime<E> {
             model_epoch: self.settled_model_epoch.clone(),
             context,
             scheme,
-            answered_by_pinyin_fallback,
             rows: SettledRerankRows {
                 texts,
                 sources,
@@ -1556,8 +1493,6 @@ impl<E: InputEngine> Runtime<E> {
             || self.generation.checked_add(1).is_none()
             // 落定重排按座位挪行，插件插入的行没有引擎下标，会被当成引擎的候选挪走；有插入的行时不做。
             || self.has_inserted_rows()
-            // 网格辅助码筛过的列表按匹配等级分组，落定模型不能跨组挪行。
-            || self.cached.grid_helpcode_constrained
     }
 
     /// 判断是否需要模型前向计算；提前退出的情况可留在会话线程处理。
@@ -1577,11 +1512,7 @@ impl<E: InputEngine> Runtime<E> {
         {
             return false;
         }
-        rerank_needs_model(
-            snapshot.scheme,
-            snapshot.answered_by_pinyin_fallback,
-            &order_rows(snapshot),
-        )
+        rerank_needs_model(snapshot.scheme, false, &order_rows(snapshot))
     }
 
     fn snapshot_settled_seats(&mut self) {
@@ -1714,53 +1645,6 @@ impl<E: InputEngine> Runtime<E> {
         self.engine.pending_suffix()
     }
 
-    /// 换触屏的组码网格。九键要求全拼或注音，14 键要求全拼或五笔，十八键和九键双拼要求全拼，双拼 14 键和 18 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
-    pub fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
-        let scheme = scheme_type(self.cached.scheme);
-        let supported = match grid {
-            None => true,
-            Some(KeyGrid::NineKey) => scheme.is_some_and(SchemeType::nine_key),
-            // 五笔 14 键与全拼共用键面和组码，由引擎按方案分别解码。
-            Some(KeyGrid::FourteenKey) => {
-                matches!(scheme, Some(SchemeType::Quanpin | SchemeType::Wubi))
-            }
-            Some(KeyGrid::EighteenKey | KeyGrid::NineKeyShuangpin(_)) => {
-                scheme == Some(SchemeType::Quanpin)
-            }
-            Some(KeyGrid::FourteenKeyShuangpin(_) | KeyGrid::EighteenKeyShuangpin(_)) => {
-                scheme == Some(SchemeType::Shuangpin)
-            }
-        };
-        if !supported {
-            return Err(RuntimeError::InvalidNineKeyScheme);
-        }
-        if !self.is_idle() {
-            return Err(RuntimeError::CompositionActive);
-        }
-        if self.cached.key_grid == grid {
-            return Ok(());
-        }
-        self.advance()?;
-        self.engine.set_key_grid(grid)?;
-        self.refresh()
-    }
-
-    pub fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
-        if enabled && !scheme_type(self.cached.scheme).is_some_and(SchemeType::nine_key) {
-            return Err(RuntimeError::InvalidNineKeyScheme);
-        }
-        if !self.is_idle() {
-            return Err(RuntimeError::CompositionActive);
-        }
-        // 比的是网格而不只是九键：14 键开着时关九键也要真的关掉网格。
-        if self.cached.key_grid == enabled.then_some(KeyGrid::NineKey) {
-            return Ok(());
-        }
-        self.advance()?;
-        self.engine.set_nine_key_enabled(enabled)?;
-        self.refresh()
-    }
-
     pub fn view(&self) -> View {
         let page = self.highlighted / self.page_size;
         let start = page * self.page_size;
@@ -1788,21 +1672,11 @@ impl<E: InputEngine> Runtime<E> {
             scheme: self.cached.scheme,
             chinese_text: scheme_type(self.cached.scheme).is_some_and(SchemeType::is_chinese),
             script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
-            nine_key: self.cached.nine_key,
-            key_grid: key_grid_name(self.cached.key_grid),
-            grid_composing: self.cached.grid_composing,
-            nine_key_spellings: self.cached.nine_key_spellings.clone(),
-            nine_key_reading: self.cached.nine_key_reading.clone(),
-            nine_key_single_character: self.cached.nine_key_single_character,
-            nine_key_strokes: self.cached.nine_key_strokes.clone(),
-            grid_helpcode_available: self.cached.grid_helpcode_available,
-            grid_helpcode_display: self.cached.grid_helpcode_display.clone(),
             touch_keyboard_layout: self.touch_keyboard_layout,
             character_width: self.character_width,
             punctuation_marks: self.punctuation_marks,
             microsoft_shuangpin: self.cached.microsoft_shuangpin,
             shuangpin_profile: self.cached.shuangpin_profile.clone(),
-            answered_by_pinyin_fallback: self.cached.answered_by_pinyin_fallback,
             local_mode: self.cached.local_mode.clone(),
             // 暂存词段后不开放新模式；Tab 仅在剩余拼写能接收末尾辅助码时由引擎公布。
             spelling_symbols: if self.phrase_prefix.is_empty() || self.cached.local_mode != "none" {
@@ -1980,13 +1854,12 @@ impl<E: InputEngine> Runtime<E> {
 
     /// 视图里这一行的文字：光标后编辑的首选前面接上固定的那段（`EngineSnapshot::caret_edit_prefix`），其余照旧。runtime 在本模式里不重排，所以首位就是引擎的首行。
     fn displayed_candidate_text(&self, index: usize, text: &str) -> String {
-        let text = self.multilingual_candidate(index, text);
         let text = if self.cached.candidate_sources.get(index)
             == Some(&(msime_engine::CandidateSource::QuickPhrase as u8))
         {
-            msime_engine::expand_quick_phrase(&text).text.into_owned()
+            msime_engine::expand_quick_phrase(text).text.into_owned()
         } else {
-            text
+            text.to_owned()
         };
         if index == 0 && !self.cached.caret_edit_prefix.is_empty() {
             let mut shown = self.cached.caret_edit_prefix.clone();
@@ -2484,11 +2357,9 @@ impl<E: InputEngine> Runtime<E> {
     ) {
         self.facts.selection = self.selection_fact(how, seat, result, edge);
         self.selected_text.clear();
-        self.selected_multilingual = None;
         if self.facts.selection.is_some() {
             if let Some(text) = self.cached.candidates.get(seat) {
                 self.selected_text.push_str(text);
-                self.capture_multilingual_selection(seat, edge);
             }
         }
     }
@@ -2634,21 +2505,7 @@ impl<E: InputEngine> Runtime<E> {
         // consumed, with its candidates, and the caret at its end.
         self.engine.command(Command::Cancel)?;
         for byte in selection.reading.bytes() {
-            // 字母归组键盘的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
-            if matches!(
-                selection.grid,
-                Some(
-                    KeyGrid::FourteenKey
-                        | KeyGrid::EighteenKey
-                        | KeyGrid::FourteenKeyShuangpin(_)
-                        | KeyGrid::EighteenKeyShuangpin(_)
-                )
-            ) && byte != b'\''
-            {
-                self.engine.grid_key(byte)?;
-            } else {
-                self.engine.character(byte, byte.is_ascii_uppercase())?;
-            }
+            self.engine.character(byte, byte.is_ascii_uppercase())?;
         }
         self.refresh()?;
         Ok(Some(self.transition(empty_result(true))))
@@ -2681,7 +2538,6 @@ impl<E: InputEngine> Runtime<E> {
                 self.phrase_selections.push(PhraseSelection {
                     word_before: self.phrase_prefix.clone(),
                     reading: consumed.to_owned(),
-                    grid: self.cached.key_grid.filter(|_| self.cached.grid_composing),
                 });
             }
             self.phrase_prefix.push_str(&result.commit);
@@ -2732,8 +2588,7 @@ impl<E: InputEngine> Runtime<E> {
             scheme: self.cached.scheme,
             local_mode: self.cached.local_mode.clone(),
             script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode)
-                && !self.commits_mixed_japanese()
-                && !self.commits_multilingual(),
+                && !self.commits_mixed_japanese(),
             // 插件给的行（`/` 指令行、插入普通候选的行）不是用户打的字，不计打字统计。
             typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode)
                 && !self.commits_plugin_row(),
@@ -2825,7 +2680,6 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn transition(&mut self, mut result: EngineResult) -> Transition {
-        self.convert_multilingual_commit(&mut result);
         let commit_cursor_suffix = self.expand_quick_phrase_commit(&mut result);
         // 每一次上屏都经过这里，所以 AI 上文只在这一处喂；插件给的行不是用户打的字，不进 AI 和重排的上文。
         if result.has_commit && !self.commits_plugin_row() {
@@ -2962,10 +2816,7 @@ impl<E: InputEngine> Runtime<E> {
                 counts[LOCAL_GROUP] > 0 && snapshot.candidate_sources[0] == ENGLISH;
             let promoted_japanese = counts[LOCAL_GROUP] > 0
                 && snapshot.candidate_sources[usize::from(promoted_english)] == JAPANESE;
-            let mut reading = snapshot.reading.chars();
-            let single_kana = scheme_type(snapshot.scheme) == Some(SchemeType::JapaneseRomaji)
-                && matches!((reading.next(), reading.next()), (Some(kana), None) if ('\u{3041}'..='\u{3096}').contains(&kana));
-            let local_prefix = (if single_kana { 2 } else { 1 }).max(contact_prefix);
+            let local_prefix = 1.max(contact_prefix);
 
             let mut next_seat = 0;
             let mut head = |group: usize, limit: usize| {
@@ -3115,8 +2966,7 @@ impl<E: InputEngine> Runtime<E> {
 
     /// 内置的呈现排序：逐键重排、整句读法降位、在线候选的座位。refresh、展开和落定重排三处都走这里，免得三处的步骤漂移。返回是否挪动了候选。
     fn order_presentation(&mut self) -> bool {
-        // 网格辅助码筛过的列表已经按匹配等级分好组，这里任何一步挪行都可能跨组。
-        if self.cached.prediction || self.cached.grid_helpcode_constrained {
+        if self.cached.prediction {
             return false;
         }
         let mut moved = self.lift_opening_particle();
@@ -3155,17 +3005,13 @@ impl<E: InputEngine> Runtime<E> {
             } else {
                 rows
             };
-            // 整池只比较 26 键上引擎多解的读法；键位网格（九宫格、14 键）照九条比较，见 `rerank_pick_within`。
-            let pool = if snapshot.key_grid.is_none() {
-                reranker.sentence_pool()
-            } else {
-                0
-            };
+            // 整池只比较 26 键上引擎多解的读法。
+            let pool = reranker.sentence_pool();
             rerank_pick_within(
                 reranker.as_mut(),
                 &self.ai_context,
                 snapshot.scheme,
-                snapshot.answered_by_pinyin_fallback,
+                false,
                 &rows,
                 pool,
             )
@@ -3262,12 +3108,8 @@ impl<E: InputEngine> Runtime<E> {
         {
             return false;
         }
-        // 引擎解码这张表时用的整句池：池让引擎挪过另一种切分的读法，降位才要连它们一起认（#10998）。键位网格的表不经整句池，与 `rerank` 一样给 0。
-        let pool = if snapshot.key_grid.is_none() {
-            self.sentence_pool()
-        } else {
-            0
-        };
+        // 引擎解码这张表时用的整句池：池让引擎挪过另一种切分的读法，降位才要连它们一起认（#10998）。
+        let pool = self.sentence_pool();
         let Some(order) = runner_up_order_pooled(
             snapshot.scheme,
             &order_rows(snapshot),
@@ -3393,20 +3235,9 @@ impl<E: InputEngine> Runtime<E> {
                 self.cached = EngineSnapshot {
                     prediction: false,
                     scheme: 255,
-                    nine_key: false,
-                    key_grid: None,
-                    nine_key_spellings: Vec::new(),
-                    nine_key_reading: String::new(),
-                    nine_key_single_character: false,
-                    nine_key_strokes: String::new(),
-                    grid_helpcode_available: false,
-                    grid_helpcode_display: String::new(),
-                    grid_helpcode_constrained: false,
-                    grid_composing: false,
                     candidate_annotations: Vec::new(),
                     candidate_codes: Vec::new(),
                     candidate_sources: Vec::new(),
-                    multilingual_conversion: None,
                     candidate_positions: Vec::new(),
                     candidate_corrected: Vec::new(),
                     candidate_answers_key: Vec::new(),
@@ -3417,8 +3248,6 @@ impl<E: InputEngine> Runtime<E> {
                     candidate_list_open: false,
                     microsoft_shuangpin: false,
                     shuangpin_profile: String::new(),
-                    answered_by_pinyin_fallback: true,
-                    wubi_unique_four_code: false,
                     local_mode: "unknown".into(),
                     spelling_symbols: String::new(),
                     dedicated_english: false,
@@ -3463,7 +3292,6 @@ impl<E: InputEngine> Runtime<E> {
                 && self.cached.candidate_codes == previous.candidate_codes
                 && self.cached.candidate_annotations == previous.candidate_annotations
                 && self.cached.candidate_sources == previous.candidate_sources
-                && self.cached.multilingual_conversion == previous.multilingual_conversion
                 && self.cached.candidate_positions == previous.candidate_positions
                 && self.cached.candidate_corrected == previous.candidate_corrected
                 && self.cached.candidate_answers_key == previous.candidate_answers_key
@@ -3507,7 +3335,6 @@ impl<E: InputEngine> Runtime<E> {
             || cached.candidate_codes != previous.candidate_codes
             || cached.candidate_annotations != previous.candidate_annotations
             || cached.candidate_sources != previous.candidate_sources
-            || cached.multilingual_conversion != previous.multilingual_conversion
             || cached.candidate_positions != previous.candidate_positions
             || cached.candidate_corrected != previous.candidate_corrected
             || cached.candidate_confident_correction != previous.candidate_confident_correction
@@ -3522,7 +3349,6 @@ impl<E: InputEngine> Runtime<E> {
     pub fn focus(&mut self, focused: bool) -> Result<Transition, RuntimeError> {
         self.facts = DispatchFacts::default();
         self.selected_text.clear();
-        self.selected_multilingual = None;
         self.advance()?;
         // Invalidate the client before cancellation, including on engine failure.
         self.focused = false;
@@ -3739,7 +3565,6 @@ impl<E: InputEngine> Runtime<E> {
         // 每次调用都从空白开始，提前返回的路径（报错、失焦）也不会留下上一键的事实。
         self.facts = DispatchFacts::default();
         self.selected_text.clear();
-        self.selected_multilingual = None;
         if matches!(&action, Action::Punctuation(value) | Action::PunctuationAscii(value) if !value.is_ascii_punctuation())
         {
             return Err(RuntimeError::InvalidPunctuation);
@@ -3809,16 +3634,6 @@ impl<E: InputEngine> Runtime<E> {
                 || id.index >= (start + self.page_size).min(self.visible_len())
             {
                 return Err(RuntimeError::StaleCandidate);
-            }
-        }
-        if let Action::ChooseNineKeySpelling(id) = &action {
-            if id.session != self.session
-                || id.generation != self.generation
-                // 九键和 14 键共用这一列拼写。
-                || self.cached.key_grid.is_none()
-                || id.index >= self.cached.nine_key_spellings.len()
-            {
-                return Err(RuntimeError::StaleNineKeySpelling);
             }
         }
         if let Action::FixCandidatePosition(_, position) = &action {
@@ -3894,53 +3709,6 @@ impl<E: InputEngine> Runtime<E> {
         // A digit on the candidate page picks a candidate; the Engine is asked the same question as
         // for Select, so it can begin a phrase the same way.
         let mut selected_by_digit = false;
-        // 五笔 14 键的一键与字母键一样可能凑满四码。
-        let character_action = matches!(action, Action::Character { .. } | Action::GridKey(_));
-        // 四码已有五笔候选时，后续字母通常顶字上屏并开始下一组编码。混输拼音能继续当前候选的读音时，
-        // 由引擎保留组字，避免把五字母拼音截成四码。判定本身是纯函数（`wubi_top_commit_on_next_key`），
-        // 开关、混输、四码完整性与读音续输四项都在那里，方便单测覆盖。
-        let letter_request = match action {
-            Action::Character { value, shift } if value.is_ascii_alphabetic() => {
-                Some(WubiTopCommitRequest {
-                    top_commit_enabled: self.wubi_fifth_code_top_commit,
-                    mixed_pinyin: self.engine.wubi_mixed_pinyin(),
-                    four_code_is_complete: self.snapshot_valid
-                        && wubi_four_code_is_complete(&self.cached),
-                    phrase_prefix_empty: self.phrase_prefix.is_empty(),
-                    pinyin_continues: self.engine.wubi_pinyin_continues(value, shift),
-                })
-            }
-            _ => None,
-        };
-        // 顶字关掉、混输开着：这个小写字母并进混输串（#10696）。引擎平时只在码表答不出或读音能续写时放开四码上限，不先放开的话这一键会被挡掉。
-        if let (Action::Character { shift: false, .. }, Some(request)) = (&action, &letter_request)
-        {
-            if wubi_mixed_grows_on_next_key(request) {
-                self.engine.allow_wubi_mixed_extension();
-            }
-        }
-        let wubi_top_commit = match action {
-            Action::Character { .. } if letter_request.is_some() => letter_request
-                .as_ref()
-                .is_some_and(wubi_top_commit_on_next_key),
-            // 五笔 14 键：组码不进混输拼音，四码之后的一键只能顶字，不看混输开关。
-            Action::GridKey(_) => wubi_top_commit_on_next_key(&WubiTopCommitRequest {
-                top_commit_enabled: self.wubi_fifth_code_top_commit,
-                mixed_pinyin: false,
-                four_code_is_complete: self.snapshot_valid
-                    && self.cached.grid_composing
-                    && wubi_four_code_is_complete(&self.cached),
-                phrase_prefix_empty: self.phrase_prefix.is_empty(),
-                pinyin_continues: false,
-            }),
-            _ => false,
-        };
-        // 九宫格组码已经到上限（`DIGIT_LIMIT`）时再按一键：先替用户选掉首选腾出位置，再把这一键接着打，和顶字一样不丢键。引擎只在光标在末尾、首选确实占用组码时说可以；否则这一键照旧被拦下并给出提示。
-        let grid_limit_pick = match action {
-            Action::Character { value, .. } => self.engine.grid_limit_pick_ready(value, false),
-            Action::GridKey(letter) => self.engine.grid_limit_pick_ready(letter, true),
-            _ => false,
-        };
         // 这次把哪个座位的候选交给了引擎、经由哪条路径，引擎调用之后再与它的上屏核对（`selection_fact`）。标点结束组字的两条路由在 `punctuation`、`punctuation_ascii` 里自己记。
         let mut pick: Option<(SelectionHow, usize)> = None;
         // 原样上屏读音的路由：bare 前缀上的 Finish 和 `CommitRaw` 命令。
@@ -4000,57 +3768,6 @@ impl<E: InputEngine> Runtime<E> {
                 pick = Some((SelectionHow::Finish, self.highlighted));
                 self.finish_seat(self.highlighted)
             }
-            // 顶字键不能丢：引擎提交的候选先上屏，再把这一键交给下一组组字；引擎放开的字母则按字面接在候选后面。
-            Action::Character { value, shift } if wubi_top_commit => {
-                let first = self.first_engine_seat();
-                pick = Some((SelectionHow::WubiTop, first));
-                self.engine
-                    .select(self.engine_index(first))
-                    .and_then(|mut committed| {
-                        let next = self.engine.character(value, shift)?;
-                        let tail = if next.has_commit {
-                            next.commit
-                        } else if !next.handled {
-                            char::from(value).to_string()
-                        } else {
-                            String::new()
-                        };
-                        if !tail.is_empty() {
-                            top_tail = char_count(&tail);
-                            committed.commit.push_str(&tail);
-                            committed.handled = true;
-                            committed.has_commit = true;
-                        }
-                        Ok(committed)
-                    })
-            }
-            // 五笔 14 键四码之后的一键：先顶首选上屏，这一键再开始下一组编码，与 26 键的第五码相同。
-            Action::GridKey(letter) if wubi_top_commit => {
-                let first = self.first_engine_seat();
-                pick = Some((SelectionHow::WubiTop, first));
-                self.engine
-                    .select(self.engine_index(first))
-                    .and_then(|picked| Ok(join_after_pick(picked, self.engine.grid_key(letter)?)))
-            }
-            Action::Character { value, shift } if grid_limit_pick => {
-                let first = self.first_engine_seat();
-                pick = Some((SelectionHow::GridLimit, first));
-                self.engine
-                    .select(self.engine_index(first))
-                    .and_then(|picked| {
-                        Ok(join_after_pick(
-                            picked,
-                            self.engine.character(value, shift)?,
-                        ))
-                    })
-            }
-            Action::GridKey(letter) if grid_limit_pick => {
-                let first = self.first_engine_seat();
-                pick = Some((SelectionHow::GridLimit, first));
-                self.engine
-                    .select(self.engine_index(first))
-                    .and_then(|picked| Ok(join_after_pick(picked, self.engine.grid_key(letter)?)))
-            }
             // 暂存词段后的模式入口按标点结束；Tab 属于剩余拼写的辅助码，仍走字符接口。
             Action::Character { value, .. }
                 if value != b'\t'
@@ -4067,8 +3784,6 @@ impl<E: InputEngine> Runtime<E> {
             }
             Action::Character { value, .. }
                 if self.cached.prediction
-                    && !self.cached.nine_key
-                    && !self.cached.key_grid.is_some_and(KeyGrid::uses_digits)
                     && !self.cached.spelling_symbols.as_bytes().contains(&value)
                     && candidate_digit_slot(value, self.page_size).is_some_and(|slot| {
                         let page_start = (self.highlighted / self.page_size) * self.page_size;
@@ -4083,10 +3798,6 @@ impl<E: InputEngine> Runtime<E> {
             }
             Action::Character { value, shift } => {
                 self.engine.character(value, shift).and_then(|result| {
-                    // 九键和 14 键的分词键 `'` 是键面上的切分动作，不是中文引号标点。
-                    if !result.handled && self.cached.key_grid.is_some() && value == b'\'' {
-                        return Ok(result);
-                    }
                     // 已有提交文本时直接交还结果，再跑标点路由会丢掉快捷模式刚提交的原文。
                     if !result.handled && !result.has_commit && value.is_ascii_punctuation() {
                         return self.punctuation(value);
@@ -4109,8 +3820,6 @@ impl<E: InputEngine> Runtime<E> {
                         || result.has_commit
                         || (self.cached.local_mode == "none"
                             && self.cached.spelling_symbols.as_bytes().contains(&value))
-                        || self.cached.nine_key
-                        || self.cached.key_grid.is_some_and(KeyGrid::uses_digits)
                         || self.cached.prediction
                         || len == 0
                     {
@@ -4134,18 +3843,6 @@ impl<E: InputEngine> Runtime<E> {
                     self.highlighted
                 };
                 self.engine.conversion_left_from(self.engine_index(seat))
-            }
-            // 14 键的组码不是可上屏的字母，两种原样提交都与 `Finish` 一样从宿主高亮行结束组字；它们在这里都不涉及英文原文学词。
-            Action::Command(Command::CommitRaw | Command::CommitRawWithoutLearning)
-                if self.cached.grid_composing
-                    && self
-                        .cached
-                        .key_grid
-                        .is_some_and(|grid| !grid.offers_raw_key())
-                    && len > 0 =>
-            {
-                pick = Some((SelectionHow::GridRaw, self.highlighted));
-                self.finish_seat(self.highlighted)
             }
             Action::Command(Command::CommitCandidate) => {
                 // 命令由引擎选择原始首行，展示可能已经重排；不能把它记成高亮行。
@@ -4199,13 +3896,6 @@ impl<E: InputEngine> Runtime<E> {
             Action::ClearCandidatePosition(id) => self
                 .engine
                 .clear_candidate_position(self.engine_index(id.index)),
-            Action::ChooseNineKeySpelling(id) => self.engine.choose_nine_key_spelling(id.index),
-            Action::GridKey(letter) => self.engine.grid_key(letter),
-            Action::GridHelpcode(op) => self.engine.grid_helpcode(op),
-            Action::SetNineKeyFilter {
-                single_character,
-                ref strokes,
-            } => self.engine.set_nine_key_filter(single_character, strokes),
             Action::Glide {
                 ref keyboard,
                 ref points,
@@ -4263,8 +3953,7 @@ impl<E: InputEngine> Runtime<E> {
         // and the automatic Wubi top-commit can produce a commit after the Engine result itself
         // says otherwise.
         let needs_commit_context = result.as_ref().is_ok_and(|result| result.has_commit)
-            || !self.phrase_prefix.is_empty()
-            || self.wubi_should_auto_commit(character_action);
+            || !self.phrase_prefix.is_empty();
         let commit_context = needs_commit_context.then(|| self.output_context());
         let refresh = self.refresh();
         self.settle_jianpin_slash(slash_from, slash_undo);
@@ -4277,16 +3966,7 @@ impl<E: InputEngine> Runtime<E> {
         // the same fourth-key behavior here; platform adapters only decide how that commit crosses
         // their native composition boundary. A held phrase is still being assembled and must stay
         // open, matching the reference's creating-word guard.
-        if self.wubi_should_auto_commit(character_action) {
-            let first = self.first_engine_seat();
-            result = self.engine.select(self.engine_index(first))?;
-            // 这次的结果整个换成了自动上屏，之前记下的事实随之作废。
-            self.record_selection(SelectionHow::WubiAuto, first, &result, None);
-            self.facts.tail_chars = 0;
-            if let Err(error) = self.refresh() {
-                result.diagnostic = format!("Candidate refresh failed: {error}");
-            }
-        }
+        // 这个裁剪版不再有五笔候选，四码唯一自动上屏整个移除。
         // The Engine takes what it used off the front of the reading, so what is gone from the
         // front is what the selection consumed. A reading that did not simply shrink - a special
         // mode rewriting it, a fallback replacing it - leaves nothing to restore, and that
@@ -4295,8 +3975,8 @@ impl<E: InputEngine> Runtime<E> {
             .as_deref()
             .and_then(|reading| reading.strip_suffix(self.cached.editing_text.as_str()))
             .unwrap_or("");
-        // 五笔顶字不是造词中途的选词：第五码只是开始下一组编码，顶下来的首选已经是用户定下的字，与 14 键顶字（`GridKey` 不算选择动作）一样立即上屏，不进暂存词段。暂存会让它挡住之后每一次顶字和四码唯一自动上屏（两者都要求没有暂存词段），续打的字母被引擎截在四码外丢掉，Esc 还会连已顶的字一起丢。
-        let picked = (selected_by_digit || selection_action || grid_limit_pick) && !wubi_top_commit;
+        // 选中的候选在造词中途只进暂存词段。
+        let picked = selected_by_digit || selection_action;
         // Esc 默认丢弃整段组字和已选词，与参考实现的 _HandleCancel 一致。
         // 开启保留已选词时，第一次只丢掉未选拼写，词段留下。
         let discarded = matches!(action, Action::Command(Command::Cancel)) && !escape_keeps_word;
@@ -4333,16 +4013,6 @@ impl<E: InputEngine> Runtime<E> {
         Ok(transition)
     }
 
-    /// 本次按键是否以唯一五笔候选被提交收尾。读缓存快照，所以 refresh 前后的两处调用会故意看到不同代。
-    fn wubi_should_auto_commit(&self, character_action: bool) -> bool {
-        wubi_auto_commit_on_fourth_key(&WubiAutoCommitRequest {
-            auto_commit_enabled: self.wubi_auto_commit_unique,
-            character_action,
-            snapshot_valid: self.snapshot_valid,
-            unique_four_code: self.cached.wubi_unique_four_code,
-            phrase_prefix_empty: self.phrase_prefix.is_empty(),
-        })
-    }
 }
 
 /// 先选掉首选、再把同一键交给引擎时，两步合成一个结果：选中的词在前，这一键若也上屏了什么就接在后面。这一键本身已经算处理过了。
@@ -4388,18 +4058,6 @@ pub(crate) fn empty_result(handled: bool) -> EngineResult {
         has_commit: false,
         commit: String::new(),
         diagnostic: String::new(),
-    }
-}
-
-/// `View::key_grid` 的取值。
-fn key_grid_name(grid: Option<KeyGrid>) -> &'static str {
-    match grid {
-        None => "none",
-        Some(KeyGrid::NineKey) => "nine_key",
-        Some(KeyGrid::EighteenKey) => "eighteen_key",
-        Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_)) => "fourteen_key",
-        Some(KeyGrid::NineKeyShuangpin(_)) => "nine_key_shuangpin",
-        Some(KeyGrid::EighteenKeyShuangpin(_)) => "eighteen_key",
     }
 }
 
@@ -4463,18 +4121,7 @@ pub(crate) fn wubi_mixed_grows_on_next_key(request: &WubiTopCommitRequest) -> bo
         && !request.pinyin_continues
 }
 
-/// 从引擎快照判断本码表是否答过完整四码：非英文或快捷模式、非拼音回退，光标在末尾且有候选。
-/// 带 `z` 的猜码仍需用户确认，不能把它当成完整编码自动顶字。
-pub(crate) fn wubi_four_code_is_complete(snapshot: &EngineSnapshot) -> bool {
-    const WUBI_COMPLETE_CODE_LENGTH: usize = 4;
-    scheme_type(snapshot.scheme) == Some(SchemeType::Wubi)
-        && !snapshot.dedicated_english
-        && snapshot.local_mode == "none"
-        && !snapshot.nine_key
-        && !snapshot.answered_by_pinyin_fallback
-        && snapshot.editing_text.len() == WUBI_COMPLETE_CODE_LENGTH
-        && !snapshot.editing_text.contains('z')
-        && msime_client_core::is_ascii_alphabetic(&snapshot.editing_text)
-        && snapshot.caret_position == WUBI_COMPLETE_CODE_LENGTH
-        && !snapshot.candidates.is_empty()
+        // 五笔方案已移除，四码唯一自动上屏不再生效。
+pub(crate) fn wubi_four_code_is_complete(_snapshot: &EngineSnapshot) -> bool {
+    false
 }

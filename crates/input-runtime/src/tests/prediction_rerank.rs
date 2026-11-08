@@ -92,29 +92,6 @@ fn prediction_contexts(calls: &Calls) -> Vec<String> {
         .collect()
 }
 
-fn engine(directory: &std::path::Path) -> msime_engine::host::Session {
-    let mut options = real_engine_options(directory);
-    options.next_word_prediction = true;
-    options.learning = false;
-    let database = std::path::Path::new(&options.dictionaries).join("msime-pinyin.db");
-    if !database.exists() {
-        rusqlite::Connection::open(database)
-            .unwrap()
-            .execute_batch(POOL_DICTIONARY)
-            .unwrap();
-    }
-    msime_engine::host::Session::new(&options).unwrap()
-}
-
-fn runtime(scorer: Option<Box<dyn CandidateScorer>>) -> (tempfile::TempDir, Runtime) {
-    let directory = tempfile::tempdir().unwrap();
-    let mut runtime = Runtime::new(engine(directory.path()), 9).unwrap();
-    runtime.focus(true).unwrap();
-    runtime.set_candidate_scorer(scorer);
-    runtime.seed_context("今天");
-    (directory, runtime)
-}
-
 fn type_keys(runtime: &mut Runtime, keys: &[u8]) {
     for value in keys {
         runtime
@@ -152,113 +129,6 @@ fn texts(runtime: &Runtime) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn without_a_scorer_prediction_keeps_the_dictionary_order() {
-    let (_directory, mut runtime) = runtime(None);
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime), BY_WEIGHT);
-}
-
-#[test]
-fn a_scorer_orders_the_dictionary_pool_against_the_committed_text() {
-    let (scorer, calls) = stub(&[("东西", -1.0), ("醋", -1.5)]);
-    let (_directory, mut runtime) = runtime(Some(scorer));
-    commit_chi(&mut runtime);
-    assert_eq!(
-        texts(&runtime),
-        ["醋", "东西", "饭", "好", "喝", "药", "苦", "亏"]
-    );
-    // 一次上屏只打一次分，上文是之前写下的 今天 接上刚上屏的 吃。
-    assert_eq!(prediction_contexts(&calls), ["今天吃"]);
-    // 之后不改变联想的刷新（翻译回包、在线候选）不再打分。
-    runtime.refresh().unwrap();
-    assert_eq!(prediction_contexts(&calls).len(), 1);
-}
-
-#[test]
-fn every_reordered_seat_commits_the_row_it_shows() {
-    let means = [("东西", -1.0), ("醋", -1.5), ("素", -1.6)];
-    let (scorer, _) = stub(&means);
-    let (_directory, mut shown) = runtime(Some(scorer));
-    commit_chi(&mut shown);
-    let rows = texts(&shown);
-    assert_eq!(rows[..3], ["醋", "素", "东西"]);
-    for (seat, text) in rows.iter().enumerate() {
-        let (scorer, _) = stub(&means);
-        let (_directory, mut runtime) = runtime(Some(scorer));
-        commit_chi(&mut runtime);
-        let id = runtime.view().candidates[seat].id;
-        let transition = runtime.dispatch(Action::Select(id)).unwrap();
-        assert_eq!(
-            transition.commit.as_deref(),
-            Some(text.as_str()),
-            "seat {seat}"
-        );
-    }
-}
-
-#[test]
-fn an_id_from_the_reordered_view_goes_stale_with_the_next_key() {
-    let (scorer, _) = stub(&[("东西", 0.0)]);
-    let (_directory, mut runtime) = runtime(Some(scorer));
-    commit_chi(&mut runtime);
-    let id = runtime.view().candidates[0].id;
-    type_keys(&mut runtime, b"w");
-    assert!(matches!(
-        runtime.dispatch(Action::Select(id)),
-        Err(RuntimeError::StaleCandidate)
-    ));
-}
-
-#[test]
-fn detaching_the_scorer_returns_to_the_dictionary_order() {
-    let (scorer, calls) = stub(&[("东西", 0.0)]);
-    let (_directory, mut runtime) = runtime(Some(scorer));
-    runtime.set_candidate_scorer(None);
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime), BY_WEIGHT);
-    assert!(prediction_contexts(&calls).is_empty());
-}
-
-#[test]
-fn a_replaced_engine_still_collects_the_pool() {
-    let (scorer, _) = stub(&[("东西", 0.0)]);
-    let (directory, mut runtime) = runtime(Some(scorer));
-    runtime.replace_engine(engine(directory.path()), 9).unwrap();
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime)[0], "东西");
-}
-
-#[test]
-fn the_privacy_gate_still_suppresses_prediction_and_its_scoring() {
-    let (scorer, calls) = stub(&[("东西", 0.0)]);
-    let (_directory, mut runtime) = runtime(Some(scorer));
-    runtime.set_prediction_allowed(false).unwrap();
-    type_keys(&mut runtime, b"chi");
-    assert_eq!(
-        select_text(&mut runtime, "吃").commit.as_deref(),
-        Some("吃")
-    );
-    assert!(runtime.view().candidates.is_empty());
-    assert!(prediction_contexts(&calls).is_empty());
-}
-
-#[test]
-fn a_held_phrase_piece_is_part_of_the_context() {
-    let (scorer, calls) = stub(&[("东西", 0.0)]);
-    let (_directory, mut runtime) = runtime(Some(scorer));
-    runtime.set_phrase_preedit(true);
-    type_keys(&mut runtime, b"wochi");
-    assert!(select_text(&mut runtime, "我").commit.is_none());
-    assert_eq!(runtime.view().phrase_prefix, "我");
-    assert_eq!(
-        select_text(&mut runtime, "吃").commit.as_deref(),
-        Some("我吃")
-    );
-    assert_eq!(texts(&runtime)[0], "东西");
-    assert_eq!(prediction_contexts(&calls), ["今天我吃"]);
-}
-
 /// 联想的每一行连同编码、附注和来源，供逐行比较。
 fn rows(runtime: &Runtime) -> Vec<(String, String, String, u8)> {
     runtime
@@ -274,24 +144,6 @@ fn rows(runtime: &Runtime) -> Vec<(String, String, String, u8)> {
             )
         })
         .collect()
-}
-
-#[test]
-fn a_scorer_too_slow_for_a_commit_leaves_prediction_as_without_one() {
-    let (_directory, mut plain) = runtime(None);
-    commit_chi(&mut plain);
-    let (scorer, calls) = slow_stub(&[("东西", -1.0), ("醋", -1.5)]);
-    let (_directory, mut slow) = runtime(Some(scorer));
-    commit_chi(&mut slow);
-    assert_eq!(texts(&slow), BY_WEIGHT);
-    assert_eq!(rows(&slow), rows(&plain));
-    // 词库没多取，也没给联想打分。
-    assert!(prediction_contexts(&calls).is_empty());
-    assert!(calls
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|(_, candidates)| !candidates.iter().any(|text| text == "饭")));
 }
 
 /// 同一个随包模型，只是报自己够快：对照用，说明下面那一条不排是速度的门禁，不是模型给不出顺序。
@@ -311,40 +163,3 @@ impl CandidateScorer for FastBundled {
     }
 }
 
-#[test]
-fn the_bundled_model_does_not_order_prediction() {
-    let model = std::sync::Arc::new(favouring_model(&['吃', '东', '西', '醋'], &['醋']));
-    let (_directory, mut bundled) = runtime(None);
-    bundled.set_reranker(Some(Reranker::new(model.clone())));
-    commit_chi(&mut bundled);
-    assert_eq!(texts(&bundled), BY_WEIGHT);
-    let (_directory, mut fast) = runtime(Some(Box::new(FastBundled(Reranker::new(model)))));
-    commit_chi(&mut fast);
-    assert_eq!(texts(&fast)[0], "醋");
-}
-
-#[test]
-fn swapping_in_a_slow_scorer_closes_the_pool() {
-    let (fast, _) = stub(&[("东西", 0.0)]);
-    let (_directory, mut runtime) = runtime(Some(fast));
-    let (slow, calls) = slow_stub(&[("东西", 0.0)]);
-    runtime.set_candidate_scorer(Some(slow));
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime), BY_WEIGHT);
-    assert!(prediction_contexts(&calls).is_empty());
-    let (fast, calls) = stub(&[("东西", 0.0)]);
-    runtime.set_candidate_scorer(Some(fast));
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime)[0], "东西");
-    assert_eq!(prediction_contexts(&calls).len(), 1);
-}
-
-#[test]
-fn a_replaced_engine_keeps_the_pool_closed_for_a_slow_scorer() {
-    let (scorer, calls) = slow_stub(&[("东西", 0.0)]);
-    let (directory, mut runtime) = runtime(Some(scorer));
-    runtime.replace_engine(engine(directory.path()), 9).unwrap();
-    commit_chi(&mut runtime);
-    assert_eq!(texts(&runtime), BY_WEIGHT);
-    assert!(prediction_contexts(&calls).is_empty());
-}

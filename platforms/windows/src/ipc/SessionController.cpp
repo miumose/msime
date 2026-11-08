@@ -33,86 +33,6 @@ SessionController::SessionController(
       stop_service_(std::move(stop_service)), interval_(interval),
       presentation_(std::move(presentation)), event_(std::move(event)),
       input_(focus_, clients, input_capacity, std::move(options)),
-      cloud_([this](CloudCandidateWorker::Result result) {
-        try {
-          (void)input_.submit(
-              [this, result = std::move(result)](InputState &state) mutable {
-                if (stopping_ || !transport_.current(result.lease.transport))
-                  return;
-                auto view = state.apply_cloud_response(
-                    result.lease, result.query, result.body);
-                // Server 已缓存相同答案时可能没有视图变化，TIP 仍须自行判定这次原始回答。
-                push_host_candidates(result.lease, 0, result.query, result.body);
-                if (view) {
-                  candidates_.online(result.lease, *view);
-                  push_uiless_candidates(result.lease, *view);
-                  if (auto query = state.translation_query(result.lease))
-                    (void)translations_.submit(result.lease, std::move(*query));
-                  refresh_expansion(result.lease);
-                }
-              });
-        } catch (...) {
-          // Optional provider delivery must never stop the input queue.
-        }
-      }),
-      ai_([this](AiCandidateWorker::Result result) {
-        try {
-          (void)input_.submit(
-              [this, result = std::move(result)](InputState &state) mutable {
-                if (stopping_ || !transport_.current(result.lease.transport))
-                  return;
-                // The worker returns plain strings; the Engine wants the JSON
-                // array its apply entry point documents.
-                nlohmann::json candidates = nlohmann::json::array();
-                for (auto &text : result.candidates)
-                  candidates.push_back(text);
-                auto view = result.candidates.empty()
-                                ? std::optional<nlohmann::json>{}
-                                : state.apply_ai_candidates(
-                                      result.lease, result.query,
-                                      candidates.dump());
-                // 回答为空、失败或被拒：告诉 Host API 这次没有回答，视图没变就不重画（#6888）。
-                if (!view)
-                  view = state.resolve_ai_candidates(result.lease, result.query);
-                push_host_candidates(result.lease, 1, result.query, candidates);
-                if (view) {
-                  candidates_.online(result.lease, *view);
-                  push_uiless_candidates(result.lease, *view);
-                  // AI insertion changes the visible candidate generation just
-                  // like cloud insertion. Re-query translations for the new
-                  // page immediately so the AI row and its neighbors do not
-                  // remain unannotated until the next key event.
-                  if (auto query = state.translation_query(result.lease))
-                    (void)translations_.submit(result.lease, std::move(*query));
-                  refresh_expansion(result.lease);
-                }
-              });
-        } catch (...) {
-          // Optional provider delivery must never stop the input queue.
-        }
-      }),
-      translations_([this](TranslationWorker::Result result) {
-        try {
-          (void)input_.submit(
-              [this, result = std::move(result)](InputState &state) mutable {
-                if (stopping_ || !transport_.current(result.lease.transport))
-                  return;
-                // 只带读音、没有释义的结果（释义是空列表）不交给会话：空列表会把会话里已有的释义清掉。
-                std::optional<nlohmann::json> view;
-                if (result.translations != "[]")
-                  view = state.apply_translations(
-                      result.lease, result.generation, result.translations);
-                // 读音只用于显示，不进会话，随释义一起交给候选窗；没有新释义可交时单独交。
-                if (view)
-                  candidates_.translations(result.lease, *view,
-                                           std::move(result.readings));
-                else if (!result.readings.empty())
-                  candidates_.readings(result.lease, std::move(result.readings));
-              });
-        } catch (...) {
-          // Optional provider delivery must never stop the input queue.
-        }
-      }),
       workers_(
           transport, input_, focus_, clients, std::move(key),
           [this](const FocusRoute &route, const FanyImeNamedpipeData &packet) {
@@ -126,9 +46,11 @@ SessionController::SessionController(
                   const FanyImeNamedpipeData &packet) {
              candidates_.delivered(lease, reply, packet);
              uiless_candidates_.delivered(lease, reply, packet);
-             host_candidates_.delivered(lease, reply, packet);
              if (presentation_.delivered)
                presentation_.delivered(lease, reply, packet);
+             // 每次送达都重置 settled 计时：用户真正停下后才做整句重排。
+             settled_pending_ = lease;
+             settled_since_ = std::chrono::steady_clock::now();
              // 卷轴展开着时，新的一页要带上它的后续候选。
              refresh_expansion(lease);
            },
@@ -138,34 +60,8 @@ SessionController::SessionController(
              if (presentation_.disconnected)
                presentation_.disconnected(ticket);
            },
-           [this](const FocusLease &lease, const PendingReply &reply) {
-             // Every delivered reply restarts the settle clock, so the pass
-             // only runs when the user has actually stopped, and never between
-             // the keystrokes of ordinary typing — which is what keeps the
-             // larger model off the keystroke path, where it measures p95
-             // 153ms against a 16ms frame.
-             settled_pending_ = lease;
-             settled_since_ = std::chrono::steady_clock::now();
-             if (reply.online_query) {
-               (void)cloud_.submit(lease, *reply.online_query);
-               // Rebuild the descriptor on the input queue after delivery: a
-               // preference update may have landed after this reply was composed.
-               const auto query = *reply.online_query;
-               const auto refresh = input_.submit([this, lease, query](InputState &state) {
-                 if (stopping_)
-                   return;
-                 const auto descriptor = state.ai_request(lease, query);
-                 (void)ai_.submit(lease, query,
-                                  descriptor.value_or(std::string{}));
-               });
-               if (!refresh)
-                 (void)ai_.submit(lease, query, std::string{});
-             }
-           },
-           [this](const FocusLease &lease, const PendingReply &reply) {
-           if (reply.translation_query)
-               (void)translations_.submit(lease, *reply.translation_query);
-           },
+           {},
+           {},
            [this](const FocusLease &lease, const FanyImeNamedpipeData &packet) {
              wait_candidate_render_for_key(lease, packet);
            },
@@ -190,25 +86,6 @@ SessionController::SessionController(
             published(snapshot);
           if (stopping_)
             return;
-          // A settings publication may change translation enablement, target,
-          // or provider credentials while a candidate page is already shown.
-          // Re-read the now-applied query on the input thread so the worker
-          // requests the new signature immediately instead of waiting for the
-          // next key event.
-          (void)input_.submit([this](InputState &state) {
-            if (stopping_)
-              return;
-            // Provider credentials, endpoint, target language, and the
-            // enablement flag are all part of the translation policy. Drop
-            // both positive and negative results before asking for the new
-            // query, even when the candidate page remains eligible.
-            translations_.clear_cache();
-            // 读音开关、释义开关或目标语言变了：旧的读音作废，等这次重新翻译带回新的。
-            candidates_.clear_readings();
-            if (auto request = state.current_translation_request())
-              (void)translations_.submit(request->first,
-                                          std::move(request->second));
-          });
         });
   control_ = std::thread(&SessionController::run, this);
 }
@@ -338,8 +215,6 @@ void SessionController::refresh_expansion(const FocusLease &lease) {
       // 引擎放出了扣着的尾部、代次前进了：这一页的身份跟着换，候选窗和点击都要按新的一代，和翻页一样立刻发布并重新请求释义。
       if (fetched->view) {
         candidates_.action(lease, *fetched->view);
-        if (auto query = state.translation_query(lease))
-          (void)translations_.submit(lease, std::move(*query));
       }
       const auto session = fetched->snapshot.at("session").get<uint64_t>();
       const auto generation = fetched->snapshot.at("generation").get<uint64_t>();
@@ -414,11 +289,6 @@ CandidateActionRequestResult SessionController::request_candidate_action(
                                             action, position);
       if (transition) {
         candidates_.action(lease, transition->at("view"));
-        // Candidate pin/remove/fix commands create a fresh Engine generation
-        // while keeping the composition visible. Re-submit the translation
-        // query for that replacement view just as a key transition does.
-        if (auto query = state.translation_query(lease))
-          (void)translations_.submit(lease, std::move(*query));
         refresh_expansion(lease);
       }
     }, InputTaskPriority::Foreground);
@@ -482,11 +352,6 @@ SessionController::request_page(const CandidatePage &page) {
       if (transition) {
         // page_candidate 回的是整次转移（commit、view…），信箱要的是其中的 view，和上面的候选菜单动作一样取出来。整次转移交进去时信箱读不到 session，静默丢掉这一帧，候选窗就一直画着翻页前的那一页。
         candidates_.action(page.lease, transition->at("view"));
-        // Paging advances the Engine generation and replaces the visible
-        // candidate set. Request translations for the new page immediately;
-        // waiting for another key event would leave the page unannotated.
-        if (auto query = state.translation_query(page.lease))
-          (void)translations_.submit(page.lease, std::move(*query));
         refresh_expansion(page.lease);
       }
     }, InputTaskPriority::Foreground);
@@ -841,9 +706,6 @@ ModeRequestResult SessionController::request_mode(const FocusLease &lease,
 }
 void SessionController::request_stop() {
   stopping_ = true;
-  cloud_.request_stop();
-  ai_.request_stop();
-  translations_.request_stop();
   candidates_.stop();
   modes_.stop();
   inbox_.close();
@@ -856,37 +718,6 @@ void SessionController::stop() {
   if (control_.joinable())
     control_.join();
 }
-void SessionController::push_host_candidates(const FocusLease &lease, unsigned operation,
-                                             const std::string &query, const nlohmann::json &result) {
-  const auto payload = host_candidates_.update(lease, operation, query, result);
-  if (!payload || stopping_) return;
-  if (++host_candidates_transaction_ == 0) ++host_candidates_transaction_;
-  const auto frames = FanyImeCandidateContinuationPipe::Encode(*payload, host_candidates_transaction_,
-      FanyImeWorkerReplyType::HostOnlineCandidates, HostOnlinePayloadLimit);
-  if (!frames) return;
-  bool failed = false;
-  try {
-    focus_.with_active(lease, [&] {
-      if (stopping_ || !transport_.current(lease.transport)) return;
-      // 持有焦点锁直到整组送完；每个分帧仍是独立的命名管道消息。
-      for (const auto &frame : *frames) {
-        std::vector<uint8_t> bytes;
-        bytes.reserve(sizeof(frame));
-        for (size_t n = 0; n < 4; ++n) bytes.push_back(static_cast<uint8_t>(frame.msg_type >> (8 * n)));
-        for (const auto c : frame.data) {
-          bytes.push_back(static_cast<uint8_t>(c));
-          bytes.push_back(static_cast<uint8_t>(static_cast<uint16_t>(c) >> 8));
-        }
-        if (transport_.send(lease.transport, FanyImePipeRole::ToTsfWorkerThread, bytes) != KeyEventSendResult::Sent) {
-          failed = true;
-          break;
-        }
-      }
-    });
-  } catch (...) { failed = true; }
-  if (failed) { focus_.invalidate(lease.transport); transport_.close(lease.transport); }
-}
-
 void SessionController::push_uiless_candidates(const FocusLease &lease,
                                                const nlohmann::json &view) {
   const auto frame = uiless_candidates_.updated(lease, view);
@@ -930,7 +761,6 @@ void SessionController::run_settled_rerank() {
       if (auto view = state.rerank_settled(lease)) {
         candidates_.online(lease, *view);
         push_uiless_candidates(lease, *view);
-        push_host_candidates(lease, 2, {}, nullptr);
         refresh_expansion(lease);
       }
     });
@@ -987,9 +817,6 @@ void SessionController::run() {
   } catch (...) {
     failure_ = ControllerFailure::Control;
   }
-  cloud_.stop();
-  ai_.stop();
-  translations_.stop();
   workers_.stop();
   input_.stop();
   if (preferences_)

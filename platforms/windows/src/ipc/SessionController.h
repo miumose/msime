@@ -3,14 +3,10 @@
 #include "CandidateClickWorker.h"
 #include "ModeMailbox.h"
 #include "CandidateMailbox.h"
-#include "CloudCandidateWorker.h"
-#include "AiCandidateWorker.h"
-#include "TranslationWorker.h"
 #include "PreferenceMonitor.h"
 #include "RegistrationInbox.h"
 #include "SessionWorkers.h"
 #include "UiLessCandidateSync.h"
-#include "HostCandidateRelay.h"
 #include <atomic>
 #include <chrono>
 #include <optional>
@@ -152,9 +148,6 @@ private:
   std::optional<FocusLease> settled_pending_;
   std::chrono::steady_clock::time_point settled_since_{};
   void run_settled_rerank();
-  void push_host_candidates(const FocusLease &, unsigned, const std::string &, const nlohmann::json &);
-  HostCandidateRelay host_candidates_;
-  uint16_t host_candidates_transaction_ = 0;
   void push_uiless_candidates(const FocusLease &lease,
                               const nlohmann::json &view);
   RegistrationInbox &inbox_;
@@ -170,9 +163,6 @@ private:
   SessionPump::Presentation presentation_;
   SessionPump::EventHandler event_;
   InputQueue input_;
-  CloudCandidateWorker cloud_;
-  AiCandidateWorker ai_;
-  TranslationWorker translations_;
   SessionWorkers workers_;
   std::unique_ptr<PreferenceMonitor> preferences_;
   std::atomic<bool> stopping_{false};

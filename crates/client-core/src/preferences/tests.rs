@@ -3386,53 +3386,6 @@ fn fuzzy_pinyin_first_enable_seeds_once_and_preserves_pruned_rules() {
 }
 
 #[test]
-fn capture_obeys_shared_enablement_and_preserves_corrupt_history() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = PreferencesStore::new(directory.path());
-    let file = directory.path().join("clipboard_history.json");
-    let preferences = Preferences {
-        clipboard_history: false,
-        ..Preferences::default()
-    };
-    let disabled = store.save(0, preferences).unwrap();
-    assert!(!store
-        .capture_clipboard_text("synthetic disabled".into())
-        .unwrap());
-    assert!(!file.exists());
-    let mut preferences = disabled.preferences;
-    preferences.clipboard_history = true;
-    let enabled = store.save(disabled.revision, preferences).unwrap();
-    assert!(store
-        .capture_clipboard_text("synthetic first".into())
-        .unwrap());
-    assert!(!store
-        .capture_clipboard_text("synthetic\0invalid".into())
-        .unwrap());
-    let history: Vec<crate::clipboard::ClipboardHistoryEntry> =
-        serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].text, "synthetic first");
-    let mut preferences = enabled.preferences;
-    preferences.clipboard_history = false;
-    let disabled = store.save(enabled.revision, preferences).unwrap();
-    assert!(!store
-        .capture_clipboard_text("synthetic stopped".into())
-        .unwrap());
-    let history: Vec<crate::clipboard::ClipboardHistoryEntry> =
-        serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].text, "synthetic first");
-    fs::write(&file, b"broken synthetic document").unwrap();
-    let mut preferences = disabled.preferences;
-    preferences.clipboard_history = true;
-    store.save(disabled.revision, preferences).unwrap();
-    assert!(store
-        .capture_clipboard_text("synthetic rejected".into())
-        .is_err());
-    assert_eq!(fs::read(&file).unwrap(), b"broken synthetic document");
-}
-
-#[test]
 fn default_ime_mode_legacy_defaults_and_roundtrips() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());

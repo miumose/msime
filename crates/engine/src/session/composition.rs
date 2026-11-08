@@ -1,10 +1,9 @@
-//! Selection advancement, segmentation getters and preedit display (core-session.md §5.8, §5.10-§5.11), including the wubi mixed routing rules that key advancement on the selected row's producer (overlays.md §3.3).
+//! Selection advancement, segmentation getters and preedit display (core-session.md §5.8, §5.10-§5.11).
 
 use std::borrow::Cow;
 
 use super::input::{CreatingWordProgress, InputSession};
 use crate::helpcode::compute_helpcodes;
-use crate::japanese::romaji::is_romaji_complete;
 use crate::pinyin::active_helpcode::{
     detect_active_helpcode_length, strip_active_helpcodes, strip_active_helpcodes_with_cases,
 };
@@ -22,7 +21,6 @@ use crate::types::{
     request_autocorrect_mask, CandidateSource, LocalInputMode, QueryRequest, SchemeKey, SchemeType,
     WordItem,
 };
-use crate::wubi::scheme::PINYIN_LOOKUP_PREFIX;
 
 /// What a selection did to the composition.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -31,7 +29,6 @@ pub(super) struct SelectionTransition {
     pub full_pure_pinyin: String,
     pub current_segmentation_with_cases: String,
     pub selected_canonical_pinyin: String,
-    pub wubi_native: bool,
 }
 
 /// A shuangpin composition split into the pinyin keys and a trailing helpcode (input_session_composition.cpp:111-163).
@@ -315,10 +312,7 @@ impl InputSession {
         if let Some(consumed) = self.literal_candidate_consumed(selected) {
             return consumed == self.raw_with_cases().len();
         }
-        // Japanese, Korean and native wubi selections always finish: their advancement never continues.
-        if self.engine.current_scheme_type().selection_completes()
-            || selected.scheme == SchemeType::Wubi
-        {
+        if self.engine.current_scheme_type().selection_completes() {
             return true;
         }
         self.selection_completes_request(self.engine.request(), selected)
@@ -349,8 +343,8 @@ impl InputSession {
             return consumed >= total;
         }
         let selected_length = Self::selected_quanpin_length(selected);
-        // 五笔临时拼音反查的引导键 `z` 不是拼音，选词只在它后面那段拼音里计算。
-        let (raw, raw_with_cases) = self.pinyin_spelling(request);
+        let raw = request.raw_input.as_str();
+        let raw_with_cases = request.raw_input_with_cases.as_str();
         let (raw_without_helpcodes, cased_without_helpcodes) = if request.enable_quanpin_helpcode {
             (
                 strip_active_helpcodes(raw, raw_with_cases),
@@ -361,27 +355,10 @@ impl InputSession {
         };
         let consumed_raw =
             raw_length_for_effective_prefix(&cased_without_helpcodes, selected_length);
-        let normalized_length = request.normalized_input.len() - self.pinyin_lookup_prefix_len();
+        let normalized_length = request.normalized_input.len();
         selected.pinyin.is_empty()
             || selected_length >= normalized_length
             || consumed_raw >= raw_without_helpcodes.len()
-    }
-
-    /// 五笔临时拼音反查时引导键 `z` 占的字节数，其余时候为 0。
-    pub(super) fn pinyin_lookup_prefix_len(&self) -> usize {
-        usize::from(self.engine.wubi_pinyin_lookup_active())
-    }
-
-    /// 请求里真正是拼音的那段原文（不带大小写的和带大小写的）：五笔临时拼音反查时去掉引导键 `z`，其余时候是整段原文。
-    fn pinyin_spelling<'a>(&self, request: &'a QueryRequest) -> (&'a str, &'a str) {
-        let prefix = self.pinyin_lookup_prefix_len();
-        let raw = request.raw_input.get(prefix..).unwrap_or_default();
-        let raw_with_cases = request
-            .raw_input_with_cases
-            .get(prefix..)
-            .filter(|cases| !cases.is_empty())
-            .unwrap_or(raw);
-        (raw, raw_with_cases)
     }
 
     /// input_session_composition.cpp:799-911.
@@ -391,21 +368,8 @@ impl InputSession {
     ) -> SelectionTransition {
         let mut transition = SelectionTransition {
             selected_canonical_pinyin: selected.canonical_pinyin.to_string(),
-            wubi_native: selected.scheme == SchemeType::Wubi,
             ..SelectionTransition::default()
         };
-        if self.is_japanese() {
-            let request = self.engine.request();
-            transition.full_pure_pinyin = request.raw_input.clone();
-            transition.current_segmentation_with_cases = request.raw_input_with_cases.clone();
-            return transition;
-        }
-        if transition.wubi_native {
-            let request = self.engine.request();
-            transition.full_pure_pinyin = request.normalized_input.clone();
-            transition.current_segmentation_with_cases = request.raw_input.clone();
-            return transition;
-        }
         transition.continues_composition = !self.selection_completes_composition(selected);
         if self.is_shuangpin() {
             let (full_pure_pinyin, rest) = {
@@ -487,21 +451,20 @@ impl InputSession {
             return transition;
         }
 
-        // Quanpin, and the quanpin rows of a wubi composition, which shorten the wubi code the same way.
         if transition.continues_composition {
-            let lookup_prefix = self.pinyin_lookup_prefix_len();
             let (full_pure_pinyin, raw_without_helpcodes, cased_without_helpcodes) = {
                 let request = self.engine.request();
-                let (raw, raw_with_cases) = self.pinyin_spelling(request);
+                let raw = request.raw_input.as_str();
+                let raw_with_cases = request.raw_input_with_cases.as_str();
                 if request.enable_quanpin_helpcode {
                     (
-                        request.normalized_input[lookup_prefix..].to_owned(),
+                        request.normalized_input.clone(),
                         strip_active_helpcodes(raw, raw_with_cases),
                         strip_active_helpcodes_with_cases(raw, raw_with_cases),
                     )
                 } else {
                     (
-                        request.normalized_input[lookup_prefix..].to_owned(),
+                        request.normalized_input.clone(),
                         raw.to_owned(),
                         raw_with_cases.to_owned(),
                     )
@@ -515,20 +478,7 @@ impl InputSession {
             let rest = remove_consumed_leading_separators(&raw_without_helpcodes[consumed..]);
             let rest_with_cases =
                 remove_consumed_leading_separators(&cased_without_helpcodes[consumed..]);
-            if self.is_wubi() {
-                // The rest of a spelling the user is still in the middle of stays pinyin; the wubi table answering it would swap schemes underneath them.
-                self.engine.keep_pinyin_tail();
-            }
-            if lookup_prefix > 0 {
-                // 反查里选走一段之后，剩下的拼音仍在反查里：把引导键 `z` 接回去，否则剩下的字母会被当成五笔码。
-                let prefix = char::from(PINYIN_LOOKUP_PREFIX);
-                let rest = format!("{prefix}{rest}");
-                let rest_with_cases = format!("{prefix}{rest_with_cases}");
-                self.engine
-                    .replace_active_raw_input(&rest, &rest_with_cases);
-            } else {
-                self.engine.replace_active_raw_input(rest, rest_with_cases);
-            }
+            self.engine.replace_active_raw_input(rest, rest_with_cases);
             self.online_requests.invalidate();
             self.update_mixed_candidates();
             transition.current_segmentation_with_cases =
@@ -552,20 +502,6 @@ impl InputSession {
         let mut word = String::with_capacity(current_word.len() + selected_word.len());
         word.push_str(current_word);
         word.push_str(selected_word);
-        if transition.wubi_native {
-            // Wubi phrases are not composed from partial selections: a wubi code is one word.
-            return CreatingWordProgress {
-                pinyin: if current_pinyin.is_empty() {
-                    transition.full_pure_pinyin.clone()
-                } else {
-                    current_pinyin.to_owned()
-                },
-                preedit: word.clone(),
-                word,
-                completed: true,
-                can_store: false,
-            };
-        }
         let selected_storable = canonical_pinyin_is_valid_for_word(
             &transition.selected_canonical_pinyin,
             selected_word,
@@ -608,14 +544,6 @@ impl InputSession {
         }
         let request = self.engine.request();
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi => Cow::Borrowed(&request.raw_input),
-            SchemeType::JapaneseRomaji
-            | SchemeType::Korean
-            | SchemeType::Cantonese
-            | SchemeType::Zhuyin
-            | SchemeType::Vietnamese
-            | SchemeType::Tibetan
-            | SchemeType::Stroke => Cow::Borrowed(self.raw_with_cases()),
             SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => with_trailing_separator(
                 if request.raw_segmentation.is_empty() {
                     Cow::Borrowed(&request.raw_input)
@@ -645,15 +573,6 @@ impl InputSession {
     pub(super) fn is_all_complete_pure_pinyin(&self) -> bool {
         let request = self.engine.request();
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi => request.valid,
-            SchemeType::JapaneseRomaji => is_romaji_complete(&request.raw_input),
-            // 韩文、粤拼、注音、越南文、藏文和笔画都不是拼音。
-            SchemeType::Korean
-            | SchemeType::Cantonese
-            | SchemeType::Zhuyin
-            | SchemeType::Vietnamese
-            | SchemeType::Tibetan
-            | SchemeType::Stroke => false,
             SchemeType::Shuangpin => {
                 let profile = self.shuangpin_profile();
                 let base = resolve_shuangpin_composition_base(request, profile);
@@ -673,43 +592,9 @@ impl InputSession {
         }
     }
 
-    /// Four native letters whose whole list is one wubi row, the rule the shipped engine applied (input_session_composition.cpp:483-490).
-    pub(super) fn wubi_unique_four_code(&self) -> bool {
-        if self.dedicated_english || self.local_mode != LocalInputMode::None {
-            return false;
-        }
-        // 带 `z` 的码是通配猜码，不是用户确定下来的编码：它后面那个「唯一」候选只跟若干个码差一个字母，
-        // 直接上屏就把「看见命中了什么」这件事拿走了——那正是这个键存在的理由。来源的
-        // `wubi_unique_four_code` 用同一条 `raw_input.find('z')` 守卫。
-        if self.engine.request().raw_input.contains('z') {
-            return false;
-        }
-        // The whole list counts, not only the wubi rows. In mixed Wubi four letters are often pinyin as well — `jixu` is the wubi code of 曳光弹 and the pinyin of 继续 — and committing the one wubi row on the fourth key takes the pinyin away from someone typing it. The wubi_mixed_routing overlay counted wubi rows only; it never applied to the shipped engine, and that rule is what auto-committed 曳光弹 for jixu.
-        // 混进来的快捷短语不算：它们只是编码恰好相同，而这条规则问的是五笔码本身唯一；算上它们，`addr`（莽原）这类码就因为词库里有同编码的短语而不再自动上屏。宿主提交的是第一格，所以第一格也得是那一行。
-        let candidates = self.candidates();
-        self.wubi_candidates_are_native()
-            && self.engine.wubi_has_complete_code()
-            && candidates
-                .first()
-                .is_some_and(|item| item.source != CandidateSource::QuickPhrase)
-            && candidates
-                .iter()
-                .filter(|item| item.source != CandidateSource::QuickPhrase)
-                .count()
-                == 1
-    }
-
     pub(super) fn has_active_helpcode(&self) -> bool {
         let request = self.engine.request();
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi
-            | SchemeType::JapaneseRomaji
-            | SchemeType::Korean
-            | SchemeType::Cantonese
-            | SchemeType::Zhuyin
-            | SchemeType::Vietnamese
-            | SchemeType::Tibetan
-            | SchemeType::Stroke => false,
             SchemeType::Shuangpin => {
                 !request.end_helpcodes.is_empty()
                     || active_shuangpin_helpcode_length(request, self.shuangpin_profile()) > 0
@@ -748,15 +633,6 @@ impl InputSession {
                     LocalInputMode::Chaizi => crate::local::chaizi::reading(&item.word).to_owned(),
                     _ => String::new(),
                 })
-                .collect();
-        }
-        // A Hanja row shows its 훈음 (나라 이름 한), the reading a Korean user picks a Hanja by.
-        if self.korean_rules_apply() {
-            let syllable = &self.engine.request().normalized_segmentation;
-            return self
-                .candidates()
-                .iter()
-                .map(|item| crate::korean::hanja::gloss(syllable, &item.word).to_owned())
                 .collect();
         }
         self.candidate_helpcode_annotations(self.candidates(), hide_helpcode, self.scheme())
@@ -825,26 +701,9 @@ impl InputSession {
         self.update_mixed_candidates();
     }
 
-    /// The code was answered only by quanpin rows (overlays.md §3.3: read from the rows, not the list as a whole).
-    pub(super) fn answered_by_pinyin_fallback(&self) -> bool {
-        self.is_wubi()
-            && !self.candidates().is_empty()
-            && self
-                .candidates()
-                .iter()
-                .all(|item| !Self::is_wubi_native_candidate(item))
-    }
-
-    pub(super) fn wubi_candidates_are_native(&self) -> bool {
-        self.is_wubi() && self.candidates().iter().any(Self::is_wubi_native_candidate)
-    }
-
     /// Whether the list reads the composition as pinyin, so selections advance and learn as pinyin.
     pub(super) fn candidates_follow_pinyin(&self) -> bool {
-        self.engine
-            .current_scheme_type()
-            .follows_pinyin_candidates()
-            || !self.wubi_candidates_are_native()
+        self.engine.current_scheme_type().follows_pinyin_candidates()
     }
 }
 

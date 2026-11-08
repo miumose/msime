@@ -12,7 +12,7 @@
 #include "CandidateWheel.h"
 #include "CursorResource.h"
 #include "GameCandidateAnchor.h"
-#include "WaveOverlayUtils.h"
+#include "MonitorDpi.h"
 #include "NativeFontAlias.h"
 #include "ServerResources.h"
 #include "TypingEffectSignal.h"

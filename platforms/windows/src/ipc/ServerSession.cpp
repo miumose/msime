@@ -29,19 +29,6 @@ nlohmann::json response(char *raw) {
   return document.at("value");
 }
 
-bool translation_preferences_changed(const nlohmann::json &before,
-                                     const nlohmann::json &after) {
-  for (const auto *key : {"candidate_translations", "candidate_english_gloss",
-                          "translation_target_language",
-                          "translation_secondary_language", "translation_account",
-                          "custom_translation", "niutrans", "tencent_tmt"}) {
-    if (before.value(key, nlohmann::json(nullptr)) !=
-        after.value(key, nlohmann::json(nullptr)))
-      return true;
-  }
-  return false;
-}
-
 // 视图里高亮的那一行；没有候选时为空。
 std::optional<HighlightedSeat> highlighted_seat(const nlohmann::json &view) {
   for (const auto &candidate : view.at("candidates"))
@@ -112,7 +99,6 @@ nlohmann::json ServerSession::activate(uint64_t epoch) {
   auto result = response(msime_client_focus(session_, input_enabled_));
   epoch_ = epoch;
   active_ = true;
-  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::deactivate(uint64_t epoch) {
@@ -193,9 +179,9 @@ void ServerSession::balance_paired_punctuation(uint64_t epoch,
 }
 nlohmann::json ServerSession::toggle_traditional_output(uint64_t epoch) {
   check_active(epoch);
-  auto current = response(msime_client_set_multilingual_output(session_, !traditional_output_));
+  // 会话本身不再提供即时简繁投影；偏好监视器把新值交给 update_preferences 后重建。
   traditional_output_ = !traditional_output_;
-  return current;
+  return view();
 }
 nlohmann::json ServerSession::dedicated_english(uint64_t epoch, bool exit) {
   check_active(epoch);
@@ -452,43 +438,6 @@ nlohmann::json ServerSession::candidate_action(uint64_t epoch,
     throw std::logic_error("Candidate action unexpectedly committed text");
   return result;
 }
-std::optional<std::string> ServerSession::online_query(uint64_t epoch) {
-  check_active(epoch);
-  try {
-    const auto value = response(msime_client_online_query(session_));
-    if (value.is_null() || !value.is_object())
-      return std::nullopt;
-    auto serialized = value.dump();
-    if (serialized.empty() || serialized.size() > MSIME_ONLINE_QUERY_MAX_BYTES)
-      return std::nullopt;
-    return serialized;
-  } catch (...) {
-    // Cloud candidates are optional. A provider/query serialization failure
-    // must not fail the input queue after Engine input has already advanced.
-    return std::nullopt;
-  }
-}
-std::optional<std::string> ServerSession::ai_request(uint64_t epoch,
-                                                     const std::string &query) {
-  check_active(epoch);
-  if (query.empty() || query.size() > MSIME_ONLINE_QUERY_MAX_BYTES)
-    return std::nullopt;
-  try {
-    const auto value = response(msime_client_ai_request_for_query(
-        session_, reinterpret_cast<const uint8_t *>(query.data()),
-        query.size()));
-    if (value.is_null() || !value.is_object())
-      return std::nullopt;
-    const auto serialized = value.dump();
-    if (serialized.empty() || serialized.size() > 131072)
-      return std::nullopt;
-    return serialized;
-  } catch (...) {
-    // AI is an optional provider. Invalid preferences or credentials must not
-    // make an otherwise valid Engine reply fail.
-    return std::nullopt;
-  }
-}
 std::optional<nlohmann::json>
 ServerSession::rerank_settled(uint64_t epoch) {
   check_active(epoch);
@@ -507,141 +456,20 @@ ServerSession::rerank_settled(uint64_t epoch) {
     return std::nullopt;
   }
 }
-std::optional<nlohmann::json>
-ServerSession::apply_cloud_response(uint64_t epoch, const std::string &query,
-                                     const std::string &body) {
-  check_active(epoch);
-  if (query.empty() || query.size() > MSIME_ONLINE_QUERY_MAX_BYTES || body.empty() ||
-      body.size() > 256 * 1024)
-    return std::nullopt;
-  try {
-    const auto value = response(msime_client_apply_cloud_response(
-        session_, reinterpret_cast<const uint8_t *>(query.data()),
-        query.size(), reinterpret_cast<const uint8_t *>(body.data()),
-        body.size()));
-    if (!value.is_object() || !value.value("applied", false) ||
-        !value.contains("view") || !value.at("view").is_object())
-      return std::nullopt;
-    return value.at("view");
-  } catch (...) {
-    // Malformed/stale provider data is a no-op, never a reason to stop input.
-    return std::nullopt;
-  }
-}
-std::optional<nlohmann::json>
-ServerSession::apply_ai_candidates(uint64_t epoch, const std::string &query,
-                                   const std::string &candidates) {
-  check_active(epoch);
-  if (query.empty() || query.size() > MSIME_ONLINE_QUERY_MAX_BYTES || candidates.empty() ||
-      candidates.size() > 16384)
-    return std::nullopt;
-  try {
-    // Source 1 is AI, so the candidates land in their own slot rather than
-    // displacing the cloud ones.
-    const auto value = response(msime_client_apply_online_candidates(
-        session_, reinterpret_cast<const uint8_t *>(query.data()), query.size(),
-        reinterpret_cast<const uint8_t *>(candidates.data()),
-        candidates.size(), 1));
-    if (!value.is_object() || !value.value("applied", false) ||
-        !value.contains("view") || !value.at("view").is_object())
-      return std::nullopt;
-    return value.at("view");
-  } catch (...) {
-    // Optional provider data is a no-op, never a reason to stop input.
-    return std::nullopt;
-  }
-}
-std::optional<nlohmann::json>
-ServerSession::resolve_ai_candidates(uint64_t epoch, const std::string &query) {
-  check_active(epoch);
-  if (query.empty() || query.size() > MSIME_ONLINE_QUERY_MAX_BYTES)
-    return std::nullopt;
-  try {
-    const auto value = response(msime_client_resolve_online_candidates(
-        session_, reinterpret_cast<const uint8_t *>(query.data()), query.size(),
-        1));
-    if (!value.is_object() || !value.value("applied", false) ||
-        !value.contains("view") || !value.at("view").is_object())
-      return std::nullopt;
-    return value.at("view");
-  } catch (...) {
-    // 这一步只是告诉 Host API 没有回答，失败了也不因此停下输入。
-    return std::nullopt;
-  }
-}
-std::optional<std::string> ServerSession::translation_query(uint64_t epoch) {
-  check_active(epoch);
-  try {
-    const auto value = response(msime_client_translation_query(session_));
-    if (value.is_null() || !value.is_object())
-      return std::nullopt;
-    auto serialized = value.dump();
-    if (serialized.empty() || serialized.size() > 65536)
-      return std::nullopt;
-    return serialized;
-  } catch (...) {
-    return std::nullopt;
-  }
-}
-std::optional<nlohmann::json>
-ServerSession::apply_translations(uint64_t epoch, uint64_t generation,
-                                  const std::string &translations) {
-  check_active(epoch);
-  if (translations.empty() || translations.size() > 1024 * 1024)
-    return std::nullopt;
-  try {
-    const auto value = response(msime_client_apply_translations(
-        session_, generation, reinterpret_cast<const uint8_t *>(translations.data()),
-        translations.size()));
-    if (!value.is_object() || !value.value("applied", false) ||
-        !value.contains("view") || !value.at("view").is_object())
-      return std::nullopt;
-    return value.at("view");
-  } catch (...) {
-    return std::nullopt;
-  }
-}
 nlohmann::json ServerSession::update_preferences(uint64_t epoch,
                                                  const std::string &snapshot) {
   check_active(epoch);
   const auto document = nlohmann::json::parse(snapshot);
   const auto next_preferences = document.at("preferences");
-  const bool cloud_changed = preferences_.value("cloud_candidates", true) !=
-                             next_preferences.value("cloud_candidates", true);
-  const auto previous_ai = preferences_.value("ai_assistant", nlohmann::json::object());
-  const auto next_ai = next_preferences.value("ai_assistant", nlohmann::json::object());
-  const bool ai_changed = previous_ai != next_ai;
-  const bool translation_changed =
-      translation_preferences_changed(preferences_, next_preferences);
   auto result = response(msime_client_update_preferences(
       session_, reinterpret_cast<const uint8_t *>(snapshot.data()),
       snapshot.size()));
   preferences_ = next_preferences;
-  const auto clear_online = [&](uint8_t source) {
-    auto cleared = response(msime_client_clear_online_candidates(session_, source));
-    if (cleared.contains("view") && cleared.at("view").is_object())
-      result["view"] = std::move(cleared.at("view"));
-  };
-  if (cloud_changed)
-    clear_online(0);
-  if (ai_changed)
-    clear_online(1);
   traditional_output_ = next_preferences.value(
       "traditional_chinese_output", false);
-  if (translation_changed && result.contains("view") &&
-      result.at("view").is_object() &&
-      result.at("view").at("generation").is_number_unsigned()) {
-    const auto empty = std::string("[]");
-    auto cleared = response(msime_client_apply_translations(
-        session_, result.at("view").at("generation").get<uint64_t>(),
-        reinterpret_cast<const uint8_t *>(empty.data()), empty.size()));
-    if (cleared.contains("view") && cleared.at("view").is_object())
-      result["view"] = std::move(cleared.at("view"));
-  }
   // 什么都没打开时共享库不启动播放器，也就没有记住先前的「激活」。这里再说一次，让焦点还在这个客户端时打开的音乐现在就开始放，而不是等到下一次焦点变化。
   if (lifecycle_active_)
     (void)msime_client_set_active(session_, true);
-  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
@@ -688,46 +516,6 @@ void ServerSession::set_commit_observe_only(bool observe_only) noexcept {
   // 错线程时 FFI 自己返回 0、什么都不改，这里不再抛出：清标志的一方在析构里调用。
   (void)msime_client_set_lifecycle(session_, lifecycle_flags(observe_only));
   commit_observe_only_ = observe_only;
-}
-uint32_t ServerSession::typing_effect(uint32_t event) {
-  check_thread();
-  return msime_client_typing_effect(session_, event);
-}
-void ServerSession::refresh_typing_effect_settings() {
-  // A settings answer that cannot be read leaves the effect as the preferences alone describe it rather than failing the focus change or the preference update it follows.
-  TypingEffectSettings settings;
-  TypingEffectPalette palette;
-  try {
-    const auto value = response(msime_client_typing_effect_settings(session_));
-    const auto intensity = value.value("intensity", 50.0);
-    std::optional<uint32_t> duration;
-    if (value.contains("duration_ms") && value.at("duration_ms").is_number())
-      duration = static_cast<uint32_t>((std::max)(0.0, value.at("duration_ms").get<double>()));
-    std::optional<uint32_t> color;
-    if (value.contains("colors") && value.at("colors").is_array() && !value.at("colors").empty() &&
-        value.at("colors").front().is_string())
-      color = typing_effect_rgb(value.at("colors").front().get<std::string>());
-    settings = resolve_typing_effect_settings(static_cast<uint32_t>((std::max)(0.0, intensity)), duration, color);
-    // 火花轮流取的颜色：读得懂的 #RRGGBB 按顺序留下，读不懂的跳过，和 macOS 的 applySettings: 一样。
-    uint32_t colors[typing_effect_max_colors] = {};
-    size_t count = 0;
-    if (value.contains("colors") && value.at("colors").is_array())
-      for (const auto &entry : value.at("colors"))
-        if (count < typing_effect_max_colors && entry.is_string())
-          if (const auto rgb = typing_effect_rgb(entry.get<std::string>()))
-            colors[count++] = *rgb;
-    std::optional<uint32_t> particles;
-    if (value.contains("particles") && value.at("particles").is_number())
-      // 先夹到 0-64 再换成整数：超出 uint32_t 的浮点数直接转换是未定义行为。
-      particles = static_cast<uint32_t>((std::min)(static_cast<double>(typing_effect_max_particles),
-                                                   (std::max)(0.0, value.at("particles").get<double>())));
-    palette = resolve_typing_effect_palette(colors, count, particles);
-  } catch (...) {
-    settings = TypingEffectSettings{};
-    palette = TypingEffectPalette{};
-  }
-  typing_effect_settings_ = settings;
-  typing_effect_palette_ = palette;
 }
 void ServerSession::set_active(bool active) {
   check_thread();

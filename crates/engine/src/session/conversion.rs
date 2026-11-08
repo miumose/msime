@@ -154,7 +154,6 @@ impl InputSession {
         matches!(self.scheme(), SchemeType::Quanpin | SchemeType::Shuangpin)
             && self.local_mode == LocalInputMode::None
             && !self.dedicated_english
-            && self.temporary_original_scheme.is_none()
     }
 
     /// `ConversionLeft` / `ConversionRight`。不在改字里时左移从首选尝试进入改字；进不了（右移、首选不是可改的整句）时为 `None`，调用方按字母光标处理。

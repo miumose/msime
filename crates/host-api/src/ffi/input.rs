@@ -26,27 +26,6 @@ pub extern "C" fn msime_client_set_candidate_page_size(handle: u64, size: u8) ->
     })
 }
 
-/// 即时投影混合候选的中文片段，不改语言集合、组字或磁盘偏好。
-/// 变体取最新请求的共享偏好；后续偏好更新可替换本次宿主临时设置。
-#[no_mangle]
-pub extern "C" fn msime_client_set_multilingual_output(
-    handle: u64,
-    traditional: bool,
-) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            let preferences = session
-                .requested
-                .as_ref()
-                .map_or(&session.applied, |snapshot| &snapshot.preferences);
-            session
-                .runtime
-                .set_multilingual_output(traditional, preferences.traditional_chinese_variant);
-            serialized_runtime_view(session)
-        })
-    })
-}
-
 /// Override the live host punctuation mode without persisting preferences.
 #[no_mangle]
 pub extern "C" fn msime_client_set_chinese_punctuation(handle: u64, enabled: bool) -> *mut c_char {
@@ -233,48 +212,6 @@ pub extern "C" fn msime_client_set_private_session(handle: u64, enabled: bool) -
     })
 }
 
-/// 在组字空闲后开启引擎负责的九键数字处理：全拼九宫格，或注音九键。`msime_client_set_key_grid` 的九键开关，关掉时连 14 键也关掉。
-#[no_mangle]
-pub extern "C" fn msime_client_set_nine_key_mode(handle: u64, enabled: bool) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            session
-                .runtime
-                .set_nine_key_enabled(enabled)
-                .map_err(|e| e.to_string())?;
-            session.key_grid_override = Some(enabled.then_some(KeyGrid::NineKey));
-            serialized_runtime_view(session)
-        })
-    })
-}
-
-/// 在组字空闲后换引擎的组码网格：0 关，1 九键，2 当前方案的 14 键（全拼或双拼），3 九键双拼，4 全拼 18 键，5 双拼 18 键。双拼表按已应用的偏好取，自定义表不能用时按默认的内置方案；其他取值报错，会话不变。
-#[no_mangle]
-pub extern "C" fn msime_client_set_key_grid(handle: u64, grid: u8) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            let grid = match grid {
-                0 => None,
-                1 => Some(KeyGrid::NineKey),
-                2 if session.options.scheme == crate::scheme_code(InputScheme::Shuangpin) => {
-                    Some(crate::fourteen_key_shuangpin_grid(&session.applied))
-                }
-                2 => Some(KeyGrid::FourteenKey),
-                3 => Some(crate::nine_key_shuangpin_grid(&session.applied).0),
-                4 => Some(KeyGrid::EighteenKey),
-                5 => Some(crate::eighteen_key_shuangpin_grid(&session.applied)),
-                _ => return Err("unknown key grid".into()),
-            };
-            session
-                .runtime
-                .set_key_grid(grid)
-                .map_err(|e| e.to_string())?;
-            session.key_grid_override = Some(grid);
-            serialized_runtime_view(session)
-        })
-    })
-}
-
 #[no_mangle]
 pub extern "C" fn msime_client_set_character_width(handle: u64, fullwidth: bool) -> *mut c_char {
     response(|| {
@@ -302,86 +239,6 @@ pub extern "C" fn msime_client_character(handle: u64, ascii: u8, shift: bool) ->
 
 /// 键位几何 JSON 的字节上限：26 个字母键加 `;` 和分离键盘的几个重复键，远不到这么多。
 const KEY_GEOMETRY_LIMIT: usize = 16 * 1024;
-
-/// 触屏宿主注册 26 键的字母键几何（只在布局变化时调用），形状见 `msime_client.h`。空串或 `id` 为 0 清除几何。不合格的 JSON 整份拒绝，原来的几何不变。
-///
-/// # Safety
-/// `json` 指向 `length` 个可读字节；`length` 为 0 时可以是空指针。缓冲不被保留。
-#[no_mangle]
-pub unsafe extern "C" fn msime_client_set_key_geometry(
-    handle: u64,
-    json: *const u8,
-    length: usize,
-) -> *mut c_char {
-    if length > KEY_GEOMETRY_LIMIT || (length > 0 && json.is_null()) {
-        return response(|| Err("invalid key geometry".into()));
-    }
-    let bytes = if length == 0 {
-        &[][..]
-    } else {
-        // SAFETY：由调用方契约保证。
-        unsafe { std::slice::from_raw_parts(json, length) }
-    };
-    let geometry = match msime_engine::touch::KeyGeometry::from_json(bytes) {
-        Ok(geometry) => geometry,
-        Err(error) => return response(|| Err(error)),
-    };
-    response(|| {
-        with_session(handle, |session| {
-            session.runtime.set_key_geometry(geometry);
-            serialized_runtime_view(session)
-        })
-    })
-}
-
-/// 触屏 26 键的一键，带上按下点 (x, y)（与注册的几何同一个坐标系）。先记下这一键的触点，再照 `msime_client_character` 原路派发，派发完不论结果如何都清掉触点。代次不符、坐标不是有限数或当前不是 26 键双拼时，与 `msime_client_character(ascii, shift)` 逐字节相同。
-#[no_mangle]
-pub extern "C" fn msime_client_touch_character(
-    handle: u64,
-    ascii: u8,
-    shift: bool,
-    geometry_id: u32,
-    x: f32,
-    y: f32,
-) -> *mut c_char {
-    // 会话不存在时这一步什么也不做，下面的派发照常报错。
-    let _ = with_session(handle, |session| {
-        let touch = session.runtime.key_touch(ascii, geometry_id, x, y);
-        session.runtime.set_key_touch(touch);
-        Ok(())
-    });
-    let view = dispatch(
-        handle,
-        Action::Character {
-            value: ascii,
-            shift,
-        },
-    );
-    let _ = with_session(handle, |session| {
-        session.runtime.set_key_touch(None);
-        Ok(())
-    });
-    view
-}
-
-/// 14 键的一键：`letter` 是这一组里的任一小写字母（宿主约定送首字母）。不在 14 键下、或不是 `a`–`z` 时 handled=false，会话不变。
-#[no_mangle]
-pub extern "C" fn msime_client_grid_key(handle: u64, letter: u8) -> *mut c_char {
-    dispatch(handle, Action::GridKey(letter))
-}
-
-/// 十四／十八键网格辅助码：`op` 为 0 放下分隔符、1 追加确定字母 `letter`、2 清除、3 追加 `letter` 所在键的整组，见头文件。其他 `op` 报错。
-#[no_mangle]
-pub extern "C" fn msime_client_grid_helpcode(handle: u64, op: u8, letter: u8) -> *mut c_char {
-    let op = match op {
-        0 => GridHelpcodeOp::Begin,
-        1 => GridHelpcodeOp::Exact(letter),
-        2 => GridHelpcodeOp::Clear,
-        3 => GridHelpcodeOp::Group(letter),
-        _ => return response(|| Err("invalid grid helpcode operation".into())),
-    };
-    dispatch(handle, Action::GridHelpcode(op))
-}
 
 #[no_mangle]
 pub extern "C" fn msime_client_command(handle: u64, command: u32) -> *mut c_char {
@@ -478,14 +335,9 @@ pub extern "C" fn msime_client_punctuation_with_context(
     }
 }
 
-/// 重复按键手势把 ASCII 标点换成中文标点。韩文、越南文和藏文只写 ASCII 标点，注音的标点键用来拼注音符号，所以这些方案不启用；日文照旧启用。
-fn scheme_allows_repeat_punctuation(scheme: u8) -> bool {
-    !matches!(
-        SchemeType::from_u8(scheme),
-        Some(
-            SchemeType::Korean | SchemeType::Zhuyin | SchemeType::Vietnamese | SchemeType::Tibetan
-        )
-    )
+/// 重复按键手势把 ASCII 标点换成中文标点。拼音方案都启用。
+fn scheme_allows_repeat_punctuation(_scheme: u8) -> bool {
+    true
 }
 
 /// Whether the commit just made arms either smart-punctuation follow-up gesture.
@@ -838,136 +690,12 @@ pub extern "C" fn msime_client_clear_candidate_position(
     )
 }
 
-/// Select one spelling from View.nine_key_spellings for the exact view generation.
-#[no_mangle]
-pub extern "C" fn msime_client_choose_nine_key_spelling(
-    handle: u64,
-    generation: u64,
-    index: usize,
-) -> *mut c_char {
-    dispatch(
-        handle,
-        Action::ChooseNineKeySpelling(NineKeySpellingId {
-            session: handle,
-            generation,
-            index,
-        }),
-    )
-}
-
-/// 九宫格候选的单字与笔画筛选，见头文件。`strokes` 是 `length` 字节的 ASCII 笔顺前缀，`length` 为 0 时可以是空指针。
-///
-/// # Safety
-/// `length` 不为 0 时，`strokes` 必须指向至少 `length` 个可读字节。
-#[no_mangle]
-pub unsafe extern "C" fn msime_client_set_nine_key_filter(
-    handle: u64,
-    single_character: bool,
-    strokes: *const u8,
-    length: usize,
-) -> *mut c_char {
-    if length > NINE_KEY_STROKE_LIMIT || (length != 0 && strokes.is_null()) {
-        return response(|| Err("invalid nine-key strokes".into()));
-    }
-    let bytes = if length == 0 {
-        &[][..]
-    } else {
-        // SAFETY：由调用方契约保证。
-        unsafe { std::slice::from_raw_parts(strokes, length) }
-    };
-    let Ok(strokes) = std::str::from_utf8(bytes) else {
-        return response(|| Err("invalid nine-key strokes".into()));
-    };
-    dispatch(
-        handle,
-        Action::SetNineKeyFilter {
-            single_character,
-            strokes: strokes.to_owned(),
-        },
-    )
-}
-
 /// 和引擎 `stroke::MAX_STROKES` 相同；更长的前缀不可能是任何字的笔顺。
 const NINE_KEY_STROKE_LIMIT: usize = 64;
 
 /// 一次滑行请求最多的字节数和点数；宿主按每个键几个点重采样的笔画离这两个上限都很远。
 const GLIDE_REQUEST_LIMIT: usize = 65_536;
 const GLIDE_POINT_LIMIT: usize = 1_024;
-
-/// 滑过字母键的一笔（滑行输入）。请求是 `{"keys":[[x,y] x 26],"key_width":w,"key_height":h,"points":[[x,y] 或 [x,y,ms], ...]}`：`a`..`z` 各键中心（按此次序）、一个字母键的尺寸和这一笔，都在宿主自选的同一个坐标系里；`ms` 是距笔画开始的毫秒数，有了它，手指在键上停一下就能确认那个键。
-///
-/// # Safety
-/// `request` 指向 `length` 个可读字节，空指针会被拒绝。
-#[no_mangle]
-pub unsafe extern "C" fn msime_client_glide(
-    handle: u64,
-    request: *const u8,
-    length: usize,
-) -> *mut c_char {
-    if request.is_null() || length == 0 || length > GLIDE_REQUEST_LIMIT {
-        return response(|| Err("invalid glide request".into()));
-    }
-    // SAFETY：由调用方契约保证。
-    let bytes = unsafe { std::slice::from_raw_parts(request, length) };
-    match glide_action(bytes) {
-        Ok(action) => dispatch(handle, action),
-        Err(error) => response(|| Err(error)),
-    }
-}
-
-fn glide_action(bytes: &[u8]) -> Result<Action, String> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct GlideRequest {
-        keys: Vec<[f32; 2]>,
-        key_width: f32,
-        key_height: f32,
-        points: Vec<Vec<f32>>,
-        #[serde(default)]
-        bilingual: bool,
-    }
-    let request: GlideRequest =
-        serde_json::from_slice(bytes).map_err(|_| "invalid glide request")?;
-    let centers: [[f32; 2]; 26] = request
-        .keys
-        .try_into()
-        .map_err(|_| "glide request needs 26 letter keys")?;
-    let keyboard = GlideKeyboard {
-        centers: centers.map(|[x, y]| (x, y)),
-        key_width: request.key_width,
-        key_height: request.key_height,
-    };
-    if !keyboard.is_valid() {
-        return Err("invalid glide keyboard".into());
-    }
-    if request.points.len() < 2 || request.points.len() > GLIDE_POINT_LIMIT {
-        return Err("invalid glide stroke".into());
-    }
-    let points = request
-        .points
-        .iter()
-        .map(|point| match *point.as_slice() {
-            [x, y] if x.is_finite() && y.is_finite() => Ok(GlidePoint {
-                x,
-                y,
-                time_ms: None,
-            }),
-            [x, y, ms] if x.is_finite() && y.is_finite() && ms.is_finite() && ms >= 0.0 => {
-                Ok(GlidePoint {
-                    x,
-                    y,
-                    time_ms: Some(ms.min(u32::MAX as f32) as u32),
-                })
-            }
-            _ => Err("invalid glide stroke".to_owned()),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Action::Glide {
-        keyboard: Box::new(keyboard),
-        points,
-        bilingual: request.bilingual,
-    })
-}
 
 /// Copy every cached Engine candidate only when a host opens an expanded panel.
 #[no_mangle]

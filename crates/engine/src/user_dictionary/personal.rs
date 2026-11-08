@@ -1672,60 +1672,6 @@ mod tests {
         assert!(edit_personal_dictionary(&paths, None, Some(&too_heavy), "").is_err());
     }
 
-    /// 由拼音自造词派生的五笔词排在同码已有词之后（`wubi_learning::learn` 取同码最小权重减一，最低到 0），所以列表会返回权重为 0 的用户词。这一行必须能删除、能调权重；新写入的词仍不得低于 1。
-    #[test]
-    fn a_derived_wubi_word_with_weight_zero_stays_editable() {
-        use PersonalDictionaryKind::Wubi;
-        let root = tempfile::tempdir().unwrap();
-        let paths = fixture(root.path());
-        sql(
-            &paths.dictionary(assets::MAIN_DICTIONARY),
-            "INSERT INTO wubi86 VALUES('abcd','甲',100),('efgh','乙',100),('abef','占位',1);",
-        );
-        assert!(crate::user_dictionary::wubi_learning::learn(
-            &paths,
-            "甲乙",
-            crate::WubiProfileKind::Wubi86
-        )
-        .unwrap());
-        let listed = || {
-            personal_dictionary_entries(&paths, 0, 10, false)
-                .unwrap()
-                .entries
-        };
-        let derived = entry(Wubi, "abef", "甲乙", 0);
-        assert_eq!(listed(), vec![derived.clone()]);
-
-        let reweighted = entry(Wubi, "abef", "甲乙", 5);
-        edit_personal_dictionary(&paths, Some(&derived), Some(&reweighted), "reweight").unwrap();
-        assert_eq!(listed(), vec![reweighted.clone()]);
-        edit_personal_dictionary(&paths, Some(&reweighted), Some(&derived), "")
-            .expect_err("a new weight stays at 1 or above");
-
-        // 回到权重 0 的状态，再按列表原样删除。
-        sql(
-            &paths.dictionary(assets::MAIN_DICTIONARY),
-            "DELETE FROM wubi86 WHERE value='甲乙'",
-        );
-        sql(
-            &paths.user(assets::USER_JOURNAL),
-            "DELETE FROM user_dictionary_operations",
-        );
-        assert!(crate::user_dictionary::wubi_learning::learn(
-            &paths,
-            "甲乙",
-            crate::WubiProfileKind::Wubi86
-        )
-        .unwrap());
-        assert_eq!(listed(), vec![derived.clone()]);
-        edit_personal_dictionary(&paths, Some(&derived), None, "remove").unwrap();
-        assert!(listed().is_empty());
-        assert!(!has(&paths, &derived));
-
-        // 存储里没有负权重；这样的“已有行”仍按越界拒绝。
-        assert!(validate_existing_entry(&entry(Wubi, "abef", "甲乙", -1)).is_err());
-    }
-
     #[test]
     fn receipt_payloads_keep_the_reference_text() {
         let mut payload = String::new();

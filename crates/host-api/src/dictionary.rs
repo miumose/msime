@@ -16,6 +16,9 @@ use serde_json::json;
 use std::ffi::c_char;
 use std::path::Path;
 
+/// 一次导入接受的文本上限（64 KiB）。
+pub(crate) const MAX_IMPORT_BYTES: usize = 64 * 1024;
+
 #[derive(Clone, Copy, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
@@ -48,17 +51,6 @@ enum ResourceKind {
     KoreanHanja,
 }
 
-impl From<ResourceKind> for msime_engine::host::dictionary_lookup::ResourceDictionaryKind {
-    fn from(kind: ResourceKind) -> Self {
-        match kind {
-            ResourceKind::Japanese => Self::Japanese,
-            ResourceKind::Cantonese => Self::Cantonese,
-            ResourceKind::Zhuyin => Self::Zhuyin,
-            ResourceKind::Stroke => Self::Stroke,
-            ResourceKind::KoreanHanja => Self::KoreanHanja,
-        }
-    }
-}
 
 /// Where a listed row comes from. A bundled row shipped with the dictionary (or was learned from typing rather than added): its code and word are fixed, so it can only be given another weight or deleted.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
@@ -304,26 +296,10 @@ const MAX_WUBI_LOOKUP_TEXT: usize = 4096;
 ///
 /// 只读五笔码表（会话用的同一份），不拿词库的维护租约：码表由 SQLite 只读打开，维护进行时读到的是替换前或替换后的完整文件，而一次查码不该让维护等它，也不该在 Android 设置进程里因为键盘进程持有维护而失败。移动端的个人词库队列也直接回答它，因为它不改任何东西。
 fn wubi_codes_json(
-    options: &msime_engine::host::EngineOptions,
-    text: &str,
+    _options: &msime_engine::host::EngineOptions,
+    _text: &str,
 ) -> Result<serde_json::Value, String> {
-    if text.len() > MAX_WUBI_LOOKUP_TEXT {
-        return Err("invalid wubi lookup".into());
-    }
-    let lookup = msime_engine::host::wubi_code_lookup(options, text);
-    let item = |codes: &msime_engine::host::WubiTextCodes| {
-        json!({
-            "text": codes.text,
-            "wubi86": codes.wubi86,
-            "wubi98": codes.wubi98,
-            "wubixsj": codes.wubixsj,
-        })
-    };
-    Ok(json!({
-        "phrase": lookup.phrase.as_ref().map(item),
-        "characters": lookup.characters.iter().map(item).collect::<Vec<_>>(),
-        "truncated": lookup.truncated,
-    }))
+    Err("wubi lookup is not supported".into())
 }
 
 #[derive(Deserialize)]
@@ -535,7 +511,7 @@ pub unsafe extern "C" fn msime_client_dictionary_hans_entries(
     response(|| {
         if text.is_null()
             || resources.is_null()
-            || text_length > msime_client_core::cloud::dictionary::MAX_IMPORT_BYTES
+            || text_length > MAX_IMPORT_BYTES
             || resources_length > 4096
         {
             return Err("invalid dictionary buffer".into());
@@ -811,10 +787,6 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
         .preferences
         .validate()
         .map_err(|_| "invalid dictionary options".to_owned())?;
-    if let Operation::Updates { command, enabled } = &request.action {
-        return crate::dictionary_updates::request(&request.options, command, *enabled);
-    }
-
     // 只有 `queue_learning_merge` 和 `merge_pending_learning` 用到：待合并的输入记录放在它下面。
     let preferences_directory = request
         .options
@@ -844,28 +816,8 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
                         table_entries_page(&options, kind, query.trim(), offset, limit)?;
                     Ok(json!({ "entries": entries, "has_more": has_more, "available": true }))
                 }
-                LookupKind::Resource(resource) => {
-                    let page = msime_engine::host::dictionary_lookup::dictionary_resource_entries(
-                        &options,
-                        resource.into(),
-                        &query,
-                        offset,
-                        limit,
-                    )
-                    .map_err(|_| "dictionary read rejected")?;
-                    let entries: Vec<_> = page
-                        .entries
-                        .into_iter()
-                        .map(|row| {
-                            json!({
-                                "kind": kind, "key": row.key, "value": row.value,
-                                "weight": row.weight, "source": "bundled",
-                            })
-                        })
-                        .collect();
-                    Ok(
-                        json!({ "entries": entries, "has_more": page.has_more, "available": page.available }),
-                    )
+                LookupKind::Resource(_) => {
+                    Err("resource dictionary lookup is not supported".into())
                 }
             }
         }
@@ -1033,11 +985,6 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             )
             .map_err(|_| "dictionary access unavailable")?
             .ok_or("dictionary maintenance busy")?;
-            // 本地备份恢复排下、还没合并的输入记录和输入习惯先删掉，否则键盘空闲时会把清除前的学习并回来。放在重置之前：删不掉时什么也还没清，报错重试即可。
-            if let Some(directory) = preferences_directory.as_deref() {
-                crate::dictionary_snapshot::discard_pending_learning(Path::new(directory))
-                    .map_err(|_| "learned-data reset rejected")?;
-            }
             msime_engine::host::reset_learned_data(&options)
                 .map_err(|_| "learned-data reset rejected")?;
             // 命名词库的词经个人词库队列写进用户词库，重置把它们一起清掉了，集合却还写着启用。还拿着维护租约时把已启用集合的词重新排进待发送队列，宿主随后照常送出（Android 设置页紧接着 `synchronize`）。没给偏好目录的宿主（桌面）没有命名词库，不排。重置已经做完，这一步失败时不报整个请求失败（宿主会以为什么都没清、不打云同步标记），而是照样回答 `reset:true`，`collections_requeued` 为 null 并带上 `collections_error`，由宿主告诉用户已添加词库的词没能写回。
@@ -1120,87 +1067,14 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             .ok_or("dictionary maintenance busy")?;
             count_entries(&options, kind, user_only)
         }
-        Operation::ExportSnapshot {
-            destination,
-            include_learning,
-        } => {
-            let _access = DictionaryAccess::try_session(
-                Path::new(&options.user_data),
-                Path::new(&options.dictionaries),
-            )
-            .map_err(|_| "dictionary access unavailable")?
-            .ok_or("dictionary maintenance busy")?;
-            crate::dictionary_snapshot::export_local_snapshot(
-                &options,
-                Path::new(&destination),
-                include_learning,
-            )
-            .map_err(str::to_owned)
-        }
-        Operation::LearningCount => {
-            let _access = DictionaryAccess::try_session(
-                Path::new(&options.user_data),
-                Path::new(&options.dictionaries),
-            )
-            .map_err(|_| "dictionary access unavailable")?
-            .ok_or("dictionary maintenance busy")?;
-            crate::dictionary_snapshot::learning_count(&options).map_err(str::to_owned)
-        }
-        Operation::QueueLearningMerge { source } => {
-            let preferences =
-                preferences_directory.ok_or("personal dictionary shared directory unavailable")?;
-            crate::dictionary_snapshot::queue_learning_merge(
-                Path::new(&preferences),
-                Path::new(&source),
-            )
-            .map_err(str::to_owned)
-        }
-        Operation::MergePendingLearning => {
-            let preferences =
-                preferences_directory.ok_or("personal dictionary shared directory unavailable")?;
-            crate::dictionary_snapshot::merge_pending_learning(&options, Path::new(&preferences))
-                .map_err(str::to_owned)
-        }
-        Operation::InspectSnapshot { source } => {
-            let source = Path::new(&source);
-            if !source.is_absolute() {
-                return Err("invalid snapshot path".into());
-            }
-            let metadata =
-                crate::dictionary_snapshot::inspect_snapshot(source).map_err(str::to_owned)?;
-            serde_json::to_value(metadata).map_err(|_| "invalid snapshot file".to_owned())
-        }
-        Operation::ExportHabits { destination } => {
-            let _access = DictionaryAccess::try_session(
-                Path::new(&options.user_data),
-                Path::new(&options.dictionaries),
-            )
-            .map_err(|_| "dictionary access unavailable")?
-            .ok_or("dictionary maintenance busy")?;
-            crate::dictionary_snapshot::habits::export_learning_habits(
-                &options,
-                Path::new(&destination),
-            )
-            .map_err(str::to_owned)
-        }
-        Operation::InspectHabits { source } => {
-            let source = Path::new(&source);
-            if !source.is_absolute() {
-                return Err("invalid habits path".into());
-            }
-            crate::dictionary_snapshot::habits::inspect_learning_habits(source)
-                .map(|habits| json!({ "habits": habits }))
-                .map_err(str::to_owned)
-        }
-        Operation::QueueHabitsMerge { source } => {
-            let preferences =
-                preferences_directory.ok_or("personal dictionary shared directory unavailable")?;
-            crate::dictionary_snapshot::habits::queue_habits_merge(
-                Path::new(&preferences),
-                Path::new(&source),
-            )
-            .map_err(str::to_owned)
-        }
+        Operation::ExportSnapshot { .. }
+        | Operation::LearningCount
+        | Operation::QueueLearningMerge { .. }
+        | Operation::MergePendingLearning
+        | Operation::InspectSnapshot { .. }
+        | Operation::ExportHabits { .. }
+        | Operation::InspectHabits { .. }
+        | Operation::QueueHabitsMerge { .. } => Err("dictionary snapshots removed".into()),
         Operation::WubiCodes { text } => wubi_codes_json(&options, &text),
     }
 }
@@ -1282,10 +1156,6 @@ pub fn personal_dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Valu
         .preferences
         .validate()
         .map_err(|_| "invalid dictionary options".to_owned())?;
-    if let Operation::Updates { command, enabled } = &request.action {
-        return crate::dictionary_updates::request(&request.options, command, *enabled);
-    }
-
     let directory = request
         .options
         .preferences_directory
@@ -2165,7 +2035,7 @@ fn parse_import(
         kind.into(),
         format,
         text,
-        msime_client_core::cloud::dictionary::MAX_IMPORT_BYTES,
+        MAX_IMPORT_BYTES,
     )
     .map_err(|error| error.to_string())?;
     if matches!(kind, Kind::Pinyin) && engine_options.is_some() {
@@ -2208,7 +2078,7 @@ fn parse_hans_import(
 ) -> Result<Vec<DictionaryEntry>, String> {
     if !matches!(kind, Kind::Pinyin)
         || text.is_empty()
-        || text.len() > msime_client_core::cloud::dictionary::MAX_IMPORT_BYTES
+        || text.len() > MAX_IMPORT_BYTES
         || text.contains('\0')
         || msime_client_core::has_disallowed_control_with_line_breaks(text)
     {
@@ -2882,11 +2752,7 @@ pub fn lookup_candidates(
         }
     }
     // The Engine reports a user's word as a dictionary one, so each is looked up as the row it came from.
-    let word_kind = if options.scheme == 2 {
-        WordKind::of_wubi_profile(options.wubi_profile).ok_or("unsupported wubi profile")?
-    } else {
-        WordKind::Pinyin
-    };
+    let word_kind = WordKind::Pinyin;
     let mut candidates: Vec<(String, String, u8)> = runtime
         .all_candidates()
         .candidates

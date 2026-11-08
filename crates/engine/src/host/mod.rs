@@ -5,7 +5,6 @@
 //! `host::Session` is a thin wrapper over the core [`crate::Session`]: the core owns the candidate revision, teardown, the key grid, the helpcode table and the shuangpin profile, and the wrapper only adds the product's contract on top. Errors are `EngineError`, whose `Display` is the C++ exception text; callers read it through `to_string()`. Audio capture lives in host-api, and offline handwriting recognition is `crate::handwriting`.
 
 pub mod dictionary;
-pub mod dictionary_lookup;
 pub mod glosses;
 pub mod options;
 pub mod session;
@@ -19,18 +18,9 @@ pub use crate::local::command::{
     usable_command_table, usable_plugin_commands,
 };
 pub use crate::shuangpin::hints::ShuangpinKeyHint;
-// 设置页编辑自定义双拼表和九键双拼表用的辅助函数：内置方案写成表的样子作编辑的起点，编辑中的表用不留存的校验，预览编辑中的九键表的键面。第三方宿主把表交给会话只需要根上的校验和取表。
-pub use crate::nine_key_shuangpin::{
-    builtin_table as nine_key_shuangpin_builtin_table,
-    check_table as check_nine_key_shuangpin_table,
-    table_key_hints as nine_key_shuangpin_table_key_hints,
-};
 pub use crate::shuangpin::custom::{
     builtin_table as shuangpin_builtin_table,
     check_custom_profile as check_shuangpin_custom_profile,
-};
-pub use crate::wubi::lookup::{
-    WubiCodeLookup, WubiTextCodes, MAX_LOOKUP_CHARACTERS as MAX_WUBI_LOOKUP_CHARACTERS,
 };
 pub use dictionary::{
     add_cantonese_words, cached_dictionary_state_revision, carry_dictionary_rows,
@@ -60,5 +50,5 @@ pub use text::{
     emoji_catalog_filtered_page, emoji_catalog_groups, emoji_catalog_slice, emoji_symbol_groups,
     encode_shuangpin, hanzi_to_pinyin, hanzi_to_pinyin_batch, is_shuangpin_syllable,
     main_dictionary_path, normalize_full_pinyin, shuangpin_key_hints, shuangpin_uses_semicolon,
-    shuangpin_zero_initials, wubi_code_lookup, CANTONESE_SHUANGPIN_HINTS,
+    shuangpin_zero_initials,
 };

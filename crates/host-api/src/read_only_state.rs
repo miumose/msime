@@ -51,33 +51,6 @@ pub(crate) fn prepare_read_only_host(
     msime_path_trust::reject_symlinked_components(&private_root)?;
     std::fs::create_dir_all(&private_root)?;
     let specification = edition.resource_set()?;
-    // App 选中并装好的下载代次：校验过、只读租约也取得到才用，否则退回随包资源。
-    if let Some((updated, selected)) =
-        crate::dictionary_updates::selected_resources(&state_root, &specification)
-    {
-        let leased =
-            msime_client_providers::dictionary_updates::lease_read_only(&state_root, &updated)
-                .is_some();
-        if leased {
-            if let Ok(mut document) = prepare_on(
-                &updated,
-                &state_root,
-                &private_root,
-                &selected,
-                &[],
-                edition,
-            ) {
-                crate::attach_bundle_beside_update(
-                    &mut document,
-                    resources,
-                    &state_root,
-                    &specification,
-                    edition,
-                );
-                return Ok(serde_json::to_string_pretty(&document)?);
-            }
-        }
-    }
     let document = prepare_on(
         resources,
         &state_root,

@@ -792,14 +792,11 @@ HRESULT CMetasequoiaIME::_HandleHostCandidateNavigation(TfEditCookie ec, ITfCont
     return _HandleCompositionInputWorker(_pCompositionProcessorEngine, ec, context, FANY_IME_NO_REQUEST_ID);
 }
 
-HRESULT CMetasequoiaIME::_HandleHostOnlineCandidates(TfEditCookie ec, ITfContext *context,
-                                                    const std::wstring &payload)
+HRESULT CMetasequoiaIME::_HandleHostOnlineCandidates(TfEditCookie, ITfContext *,
+                                                    const std::wstring &)
 {
-    auto *host = _pCompositionProcessorEngine ? _pCompositionProcessorEngine->GetHostEngineAdapter() : nullptr;
-    if (!Global::IsUiLessMode() || !host || !host->valid() || !_IsComposing()) return S_OK;
-    const std::string encoded(payload.begin(), payload.end());
-    if (!host->apply_online_update(encoded)) return S_OK;
-    return _HandleCompositionInputWorker(_pCompositionProcessorEngine, ec, context, FANY_IME_NO_REQUEST_ID);
+    // 在线候选与 AI 已移除，不再处理宿主在线候选回复。
+    return S_OK;
 }
 
 bool CMetasequoiaIME::_CancelHostComposition()

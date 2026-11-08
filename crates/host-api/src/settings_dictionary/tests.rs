@@ -1,5 +1,5 @@
 use super::*;
-use msime_client_core::cloud::dictionary::MAX_IMPORT_BYTES;
+use crate::dictionary::MAX_IMPORT_BYTES;
 use msime_client_services::dictionary::import::{ImportEntry, ImportIssue, MAX_ENTRIES};
 use std::collections::{BTreeSet, HashSet};
 

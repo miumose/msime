@@ -126,12 +126,6 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     // 上屏后联想跟着宿主会话走：这次编辑上屏后出了新的一代就显示在光标处，联想没了就关掉候选窗，见 _RefreshPrediction。
     _pTextService->_RefreshPrediction(ec, _pContext);
 
-    if (hResult == S_OK && Global::IsUiLessMode() && _requestId != FANY_IME_NO_REQUEST_ID && _requestId != 0)
-    {
-        auto *engine = _pTextService->GetCompositionProcessorEngine();
-        auto *host = engine ? engine->GetHostEngineAdapter() : nullptr;
-        if (host && host->valid()) host->capture_online_request(_requestId);
-    }
     if (isLocalReset)
     {
         _pTextService->_CompleteLocalSessionReset(_localResetToken);

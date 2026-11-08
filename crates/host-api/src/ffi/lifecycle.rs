@@ -49,11 +49,7 @@ pub(crate) fn destroy_session(handle: u64) -> Result<Value, String> {
         // 还在组字时先发 composition_end{Destroyed}；是音乐所有者时关掉音乐。
         session.lifecycle_destroy();
         // A host may tear a session down without a focus-out first; what it counted is still written.
-        session.flush_selections();
         // 宿主经 `record` 攒在本进程里的上屏也在这里写出：销毁会话是收尾，之后进程可能就退出了。移动宿主在 UI 线程上销毁，交给后台线程写。
-        crate::ffi::session::flush_typing_statistics(
-            crate::ffi::session::FLUSHES_TYPING_STATISTICS_INLINE_ON_DESTROY,
-        );
         // 引擎会话销毁时会写下本日志的延迟上下文学习。桌面宿主可能马上退出，所以仍在这里
         // 冲刷进程里的其他日志；Android 把进程级冲刷排到输入法工作线程，导航不再等待 UI
         // 线程上的磁盘写入。
@@ -90,14 +86,7 @@ pub extern "C" fn msime_client_set_lifecycle(handle: u64, flags: u32) -> u32 {
         let accepted = match session.lifecycle.as_deref_mut() {
             Some(state) => state.set_flags(&session.sound, flags),
             None => {
-                let mut state = lifecycle::LifecycleState::new(handle, flags);
-                state.bind_scripts(
-                    session.plugin_roots.installed.clone(),
-                    session.plugin_roots.builtin_packs.clone(),
-                    &session.options.user_data,
-                );
-                // 脚本插件的候选变换和插件指令的提供者挂在 runtime 上，只在派发类调用里运行；移动端什么都不挂。
-                state.attach_scripts(&mut session.runtime);
+                let state = lifecycle::LifecycleState::new(handle, flags);
                 let accepted = state.flags();
                 session.lifecycle = Some(Box::new(state));
                 // 选择加入之前聚焦过的会话，插件指令不等下一次聚焦。
@@ -161,11 +150,9 @@ pub extern "C" fn msime_client_flush_all() -> *mut c_char {
             // A reentrant call (from inside another host call on this thread) cannot reach the sessions; the Engine's queue is still written.
             if let Ok(mut sessions) = sessions.try_borrow_mut() {
                 for session in sessions.values_mut() {
-                    session.flush_selections();
-                }
+                            }
             }
         });
-        msime_client_services::typing_statistics::flush_pending_commits();
         msime_engine::flush_personal_learning();
         Ok(Value::Null)
     })

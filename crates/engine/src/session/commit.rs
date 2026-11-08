@@ -1,6 +1,5 @@
 //! Selection and commit (core-session.md §5.7).
 
-use super::cantonese_learning::{is_cantonese_row, CantonesePick};
 use super::chain::Pick;
 use super::input::InputSession;
 use crate::diagnostics;
@@ -38,9 +37,6 @@ impl InputSession {
         if self.conversion.is_some() {
             return self.select_conversion_row(index);
         }
-        if let Some(result) = self.select_in_open_list(index) {
-            return result;
-        }
         if !self.has_composition() || index >= self.candidates().len() {
             return KeyResult::unhandled();
         }
@@ -65,9 +61,6 @@ impl InputSession {
             return KeyResult::unhandled();
         }
         // A row of an editor-owned list is a choice for the conversion, not text to commit, so its edge characters are not either.
-        if let Some(result) = self.select_in_open_list(index) {
-            return result;
-        }
         if !self.has_composition() {
             return KeyResult::unhandled();
         }
@@ -96,23 +89,6 @@ impl InputSession {
         KeyResult::committed(character)
     }
 
-    /// Choosing a row of an openable list whose rows stay in the editor (Zhuyin): the row's text replaces its span of the conversion, the list closes and nothing is committed. Unhandled when there is no such row. `None` when no such list is open; the Korean Hanja list commits its row through `commit`.
-    fn select_in_open_list(&mut self, index: usize) -> Option<KeyResult> {
-        if !self.candidate_list_open() || !self.zhuyin_rules_apply() {
-            return None;
-        }
-        let selected = self.engine.select_zhuyin(index);
-        self.update_mixed_candidates();
-        Some(match selected {
-            Ok(true) => {
-                self.online_requests.invalidate();
-                KeyResult::handled()
-            }
-            Ok(false) => KeyResult::unhandled(),
-            Err(error) => KeyResult::handled().with_diagnostic(Some(error.to_string())),
-        })
-    }
-
     /// Commit segment by segment until nothing is composing. An open Korean Hanja list is closed first, so finishing (punctuation, leaving the client, a host's finish key) commits the Hangul: only an explicit choice commits a Hanja.
     pub(super) fn finish_composition(&mut self, first_index: usize) -> KeyResult {
         if self.glide_selection_pending && self.has_composition() {
@@ -120,7 +96,6 @@ impl InputSession {
         }
         // 上屏/结束组字同样结束大写串：宿主结束键（`Action::Finish`、失焦、macOS 的 Cmd+A）与字面标点路由都从这里过，不经过 `handle_command`（#7616）。
         self.end_uppercase_run();
-        self.close_korean_hanja();
         let mut result = KeyResult::unhandled();
         // 高亮停在 AI 占位行上时，按没有高亮处理：上屏首选，不上屏占位文字。
         let mut index = if self.candidates().get(first_index).is_some_and(|item| {
@@ -218,16 +193,6 @@ impl InputSession {
         }
         // A selection made while a caret prefix is decoded leaves prefix mode: the rest of the composition decodes whole again.
         self.caret = None;
-        // A Zhuyin commit is the converted text, whatever the list shows: its rows are choices inside the conversion, made through `select_in_open_list`. The pending syllable is dropped, nothing is learned, and a composition that converted nothing yet commits nothing.
-        if self.zhuyin_rules_apply() {
-            let text = self.engine.take_zhuyin_text();
-            self.reset_composition();
-            self.chain.reset();
-            if text.is_empty() {
-                return KeyResult::handled();
-            }
-            return KeyResult::committed(text);
-        }
         let committed = |text: Option<String>, diagnostic: Option<String>| KeyResult {
             handled: true,
             commit: text,
@@ -244,57 +209,6 @@ impl InputSession {
             self.chain.reset();
             self.reset_composition();
             return committed(text, diagnostic);
-        }
-        if self.stroke_rules_apply() {
-            let text = self.candidates().get(index).map_or_else(
-                || self.engine.request().raw_input.clone(),
-                |item| item.word.to_string(),
-            );
-            self.reset_composition();
-            self.chain.reset();
-            return KeyResult::committed(text);
-        }
-        if self.cantonese_rules_apply() {
-            let Some(candidate) = self.candidates().get(index) else {
-                let text = self.preedit();
-                self.reset_composition();
-                self.chain.reset();
-                return KeyResult::committed(text);
-            };
-            let text = candidate.word.clone();
-            let key = candidate.canonical_pinyin.clone();
-            let dictionary_word = self.engine.cantonese_dictionary_word(&key, &text);
-            let cantonese_row = is_cantonese_row(candidate);
-            let end = candidate.pinyin.len();
-            // 组句标记和调频都在拿走这一段之前取：拿走后候选换成剩下那段的。
-            let pick = CantonesePick {
-                key: &key,
-                word: &dictionary_word,
-                cantonese_row,
-                composed: cantonese_row && self.engine.cantonese_row_is_composed(&key, &text),
-            };
-            let mut diagnostic = self.learn_cantonese_frequency(index, &pick);
-            let composing = self.engine.select_cantonese_end(end);
-            if let Some(phrase_diagnostic) = self.note_cantonese_piece(&pick, composing) {
-                diagnostic.get_or_insert(phrase_diagnostic);
-            }
-            if composing {
-                self.update_mixed_candidates();
-            } else {
-                self.reset_composition();
-            }
-            self.chain.reset();
-            return committed(Some(text.to_string()), diagnostic);
-        }
-        if self.korean_rules_apply() || self.vietnamese_rules_apply() || self.tibetan_rules_apply()
-        {
-            let text = self
-                .candidates()
-                .get(index)
-                .map_or_else(|| self.preedit(), |item| item.word.to_string());
-            self.reset_composition();
-            self.chain.reset();
-            return KeyResult::committed(text);
         }
         let copy_sentence_words = self.personal_context_applies();
         let selected = self
@@ -314,10 +228,6 @@ impl InputSession {
             ) && self.local_preedit.len() == 1 =>
             {
                 None
-            }
-            // 五笔临时拼音反查没有候选时上屏键入的拼音，引导键 `z` 同样只是标记。
-            None if self.engine.wubi_pinyin_lookup_active() => {
-                Some(self.preedit().split_off(1)).filter(|text| !text.is_empty())
             }
             None => Some(self.raw_commit_text()),
         };
@@ -389,8 +299,6 @@ impl InputSession {
         );
         let pick = (has_dictionary_reading
             && !learned_sentence_word
-            && !self.is_wubi()
-            && !self.is_japanese()
             && self.learning_enabled
             && self.personal_context_enabled)
             .then(|| Pick {
@@ -422,11 +330,9 @@ impl InputSession {
             self.discard_abandoned_phrase_progress();
             return committed(text, diagnostic);
         }
-        // 反查是查编码用的，不造词：它的词条不该因为一次查询进到用户词库。
         if !self.phrase_progress.word.is_empty()
             && progress.can_store
             && self.learning_enabled
-            && !self.engine.wubi_pinyin_lookup_active()
             && self
                 .store_user_phrase_from_canonical_pinyin(&progress.pinyin, &progress.word)
                 .is_err()
@@ -450,10 +356,6 @@ impl InputSession {
     ) -> Result<()> {
         self.canonical_phrase_engine()
             .create_word_from_canonical_pinyin(pinyin, word)?;
-        let profile = self.engine.wubi_input_options().profile;
-        if crate::user_dictionary::wubi_learning::learn(&self.paths, word, profile)? {
-            self.engine.reset_cache();
-        }
         Ok(())
     }
 

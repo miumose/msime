@@ -245,7 +245,7 @@ impl InputSession {
             }
             rows.extend(english);
             let journal = self.journal_path();
-            let context = self.position_context(true, false);
+            let context = self.position_context(true);
             apply_fixed_positions_with_state(
                 journal,
                 context.as_ref(),

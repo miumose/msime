@@ -73,6 +73,7 @@ if(WIN32)
   endif()
   add_test(NAME windows-candidate-font-format COMMAND windows-candidate-font-format)
   set_tests_properties(windows-candidate-font-format PROPERTIES TIMEOUT 10)
+endif()
 add_executable(windows-registration-inbox tests/runtime/registration_inbox.cpp)
 target_include_directories(windows-registration-inbox PRIVATE src)
 target_link_libraries(windows-registration-inbox PRIVATE Threads::Threads)
@@ -1368,9 +1369,7 @@ else()
 endif()
 add_test(NAME windows-paired-punctuation-balance COMMAND windows-paired-punctuation-balance)
 set_tests_properties(windows-paired-punctuation-balance PROPERTIES TIMEOUT 30)
-add_library(msime-windows-pump STATIC src/ipc/SessionPump.cpp src/ipc/SessionWorkers.cpp src/ipc/SessionController.cpp src/system/PreferenceMonitor.cpp
-            src/candidate/CloudCandidateWorker.cpp src/candidate/TranslationWorker.cpp
-            src/candidate/AiCandidateWorker.cpp src/candidate/JapaneseReader.cpp)
+add_library(msime-windows-pump STATIC src/ipc/SessionPump.cpp src/ipc/SessionWorkers.cpp src/ipc/SessionController.cpp src/system/PreferenceMonitor.cpp)
 # JapaneseReader.cpp 经 COM 用微软日语输入法的 IFELanguage，要 ole32。
 target_link_libraries(msime-windows-pump PUBLIC msime-windows-input CURL::libcurl ole32)
 add_executable(windows-dedicated-english-controller tests/input/dedicated_english_controller.cpp)
@@ -1925,7 +1924,7 @@ if(WIN32)
   add_test(NAME windows-toolbar-image COMMAND windows-toolbar-image)
   set_tests_properties(windows-toolbar-image PROPERTIES TIMEOUT 30)
   add_subdirectory(tsf)
-  add_library(msime-windows-server STATIC src/system/WindowsServer.cpp src/candidate/CandidateWindow.cpp src/candidate/CandidateFlyoutWindow.cpp src/candidate/TrayMenuWindow.cpp ../../platforms/common/Telemetry.cpp ../../platforms/common/CrashRecorder.cpp)
+  add_library(msime-windows-server STATIC src/system/WindowsServer.cpp src/candidate/CandidateWindow.cpp src/candidate/CandidateFlyoutWindow.cpp src/candidate/TrayMenuWindow.cpp)
   target_sources(msime-windows-server PRIVATE src/candidate/DesktopCandidates.cpp)
   add_executable(windows-desktop-candidates tests/ui/desktop_candidates.cpp)
   target_link_libraries(windows-desktop-candidates PRIVATE msime-windows-server)
@@ -1937,14 +1936,17 @@ if(WIN32)
   add_test(NAME windows-desktop-candidates COMMAND windows-desktop-candidates)
   set_tests_properties(windows-desktop-candidates PROPERTIES TIMEOUT 60)
   target_include_directories(msime-windows-server PRIVATE ../../platforms/common)
-  # src/entrypoints/server_main.cpp constructs ClipboardHistory and ClipboardMonitor, whose definitions
-  # are out of line. Without these the Server target does not link at all.
-  target_sources(msime-windows-server PRIVATE src/clipboard/ClipboardHistory.cpp src/clipboard/ClipboardMonitor.cpp)
   # 候选窗、悬浮状态栏和托盘卡片共用的 UI Automation 提供者（读屏）；UiaReturnRawElementProvider 等在 uiautomationcore，BSTR 与 SAFEARRAY 在 oleaut32。
   target_sources(msime-windows-server PRIVATE src/candidate/AccessibleWindow.cpp)
-  target_link_libraries(msime-windows-server PUBLIC uiautomationcore oleaut32)
-  target_sources(msime-windows-server PRIVATE src/candidate/FloatingToolbarWindow.cpp src/candidate/InputModeHudWindow.cpp src/candidate/ShuangpinKeymapWindow.cpp src/candidate/TypingEffectOverlay.cpp src/system/ShellLauncher.cpp src/system/DiagnosticLog.cpp src/system/SystemAccent.cpp src/system/UpdateNotifier.cpp src/system/DictionarySyncWorker.cpp src/system/ProcessPriority.cpp
-                 src/input/MaintenanceHotkey.cpp)
+  # 服务器窗口层依赖会话管线、共享契约和 msimeui 的 Direct2D 资源。
+  target_link_libraries(msime-windows-server PUBLIC uiautomationcore oleaut32
+    msime-windows-pump msimeui nlohmann_json::nlohmann_json Threads::Threads
+    "${MSIME_HOST_LIBRARY}" d2d1 dwrite dwmapi d3d11 dxgi dxguid user32 gdi32
+    shell32 ole32 advapi32 uuid comctl32)
+  target_sources(msime-windows-server PRIVATE src/candidate/FloatingToolbarWindow.cpp src/candidate/InputModeHudWindow.cpp src/candidate/ShuangpinKeymapWindow.cpp src/candidate/TypingEffectOverlay.cpp src/system/ShellLauncher.cpp src/system/DiagnosticLog.cpp src/system/SystemAccent.cpp src/system/ProcessPriority.cpp
+                 src/input/MaintenanceHotkey.cpp
+                 src/ipc/AuxListener.cpp src/ipc/DiagnosticListener.cpp src/ipc/PipeService.cpp src/ipc/PipeMainTransport.cpp
+                 src/ipc/PipeHandshake.cpp src/ipc/PipeIo.cpp src/ipc/PipeListener.cpp src/ipc/PipeIntake.cpp src/ipc/PipePeer.cpp src/ipc/PipeRegistry.cpp)
   add_executable(windows-clipboard-text tests/clipboard/clipboard_text.cpp)
   target_include_directories(windows-clipboard-text PRIVATE src)
   target_link_libraries(windows-clipboard-text PRIVATE msime-windows-server)

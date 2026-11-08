@@ -132,22 +132,6 @@ pub trait InputEngine {
     fn set_dedicated_english(&mut self, _enabled: bool) -> Result<(), RuntimeError> {
         Ok(())
     }
-    fn set_nine_key_enabled(&mut self, _enabled: bool) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Engine("Nine-key mode is unsupported".into()))
-    }
-    /// 触屏的组码网格（九键、14 键），`None` 不用网格；没有九宫格的引擎不支持。
-    fn set_key_grid(&mut self, _grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Engine("Key grids are unsupported".into()))
-    }
-    /// 14 键的一键，`letter` 是这一组里的任一字母；没有网格的引擎不处理。
-    fn grid_key(&mut self, _letter: u8) -> Result<EngineResult, RuntimeError> {
-        Ok(EngineResult {
-            handled: false,
-            has_commit: false,
-            commit: String::new(),
-            diagnostic: String::new(),
-        })
-    }
     /// Replace the `/` mode's command table. Engines without the mode ignore it.
     fn set_command_table(&mut self, _table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
         Ok(())
@@ -172,30 +156,6 @@ pub trait InputEngine {
     /// default answers no, which is what an engine that already returns everything it has means.
     fn expand_initial_candidates(&mut self) -> Result<bool, RuntimeError> {
         Ok(false)
-    }
-    fn choose_nine_key_spelling(&mut self, _index: usize) -> Result<EngineResult, RuntimeError> {
-        Err(RuntimeError::Engine(
-            "Nine-key spelling selection is unsupported".into(),
-        ))
-    }
-    /// 十四／十八键网格辅助码的分隔符、确定字母和清除；没有网格辅助码的引擎不处理。
-    fn grid_helpcode(&mut self, _op: GridHelpcodeOp) -> Result<EngineResult, RuntimeError> {
-        Ok(EngineResult {
-            handled: false,
-            has_commit: false,
-            commit: String::new(),
-            diagnostic: String::new(),
-        })
-    }
-    /// 九宫格候选只留单字、按笔顺前缀筛选；没有九宫格的引擎不支持。
-    fn set_nine_key_filter(
-        &mut self,
-        _single_character: bool,
-        _strokes: &str,
-    ) -> Result<EngineResult, RuntimeError> {
-        Err(RuntimeError::Engine(
-            "Nine-key candidate filters are unsupported".into(),
-        ))
     }
     /// 引擎持有的明确选词门禁；默认适配器沿用普通确认规则。
     fn requires_candidate_selection(&self) -> bool {
@@ -443,16 +403,6 @@ impl InputEngine for Session {
         Session::set_dedicated_english(self, enabled)
             .map_err(|e| RuntimeError::Engine(e.to_string()))
     }
-    fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
-        Session::set_nine_key_enabled(self, enabled)
-            .map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
-    fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
-        Session::set_key_grid(self, grid).map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
-    fn grid_key(&mut self, letter: u8) -> Result<EngineResult, RuntimeError> {
-        Session::grid_key(self, letter).map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
     fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
         Session::set_command_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
     }
@@ -471,21 +421,6 @@ impl InputEngine for Session {
     }
     fn expand_initial_candidates(&mut self) -> Result<bool, RuntimeError> {
         Session::expand_initial_candidates(self).map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
-    fn choose_nine_key_spelling(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
-        Session::choose_nine_key_spelling(self, index)
-            .map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
-    fn grid_helpcode(&mut self, op: GridHelpcodeOp) -> Result<EngineResult, RuntimeError> {
-        Session::grid_helpcode(self, op).map_err(|e| RuntimeError::Engine(e.to_string()))
-    }
-    fn set_nine_key_filter(
-        &mut self,
-        single_character: bool,
-        strokes: &str,
-    ) -> Result<EngineResult, RuntimeError> {
-        Session::set_nine_key_filter(self, single_character, strokes)
-            .map_err(|e| RuntimeError::Engine(e.to_string()))
     }
     fn glide(
         &mut self,

@@ -2,7 +2,7 @@
 
 #include "KeyEventSendResult.h"
 #include "VoiceCompositionPipe.h"
-#include <Windows.h>
+#include <windows.h>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

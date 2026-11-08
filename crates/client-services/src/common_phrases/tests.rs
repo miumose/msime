@@ -1,5 +1,4 @@
 use super::*;
-use crate::community::resource::{CommunityResourceContent, SharedPhrase};
 use std::fs;
 use std::process::Command;
 
@@ -214,34 +213,6 @@ fn category_backup_adopts_default_on_empty_device_and_rejects_partial_imports() 
     assert_eq!(store.load().unwrap(), full);
 }
 
-fn pack(id: u128, revision: u32, texts: &[&str]) -> CommunityResource {
-    CommunityResource {
-        id: Uuid::from_u128(id),
-        kind: CommunityResourceKind::Phrase,
-        name: "邮件签名".into(),
-        description: "示例短语包".into(),
-        author: "示例作者".into(),
-        content: CommunityResourceContent {
-            phrases: texts
-                .iter()
-                .map(|text| SharedPhrase {
-                    text: (*text).into(),
-                    group: String::new(),
-                })
-                .collect(),
-            ..Default::default()
-        },
-        revision,
-        saves: 0,
-        saved: false,
-        owned: false,
-        rating_count: 0,
-        rating_average: 0.0,
-        my_rating: 0,
-        moderation: None,
-    }
-}
-
 fn texts(document: &CommonPhrases) -> Vec<&str> {
     document
         .phrases
@@ -345,18 +316,6 @@ fn common_phrases_replace_remove_and_move_by_id() {
 }
 
 
-
-#[test]
-fn invalid_local_pack_phrases_do_not_reserve_normalization_capacity() {
-    let long = "字".repeat(MAX_PHRASE_UTF16 + 1);
-    let resource = pack(1, 1, &[&long]);
-
-    let (normalized, skipped) = super::normalized_pack_texts(&resource);
-
-    assert!(normalized.is_empty());
-    assert_eq!(normalized.capacity(), 0);
-    assert_eq!(skipped, 1);
-}
 
 
 #[test]

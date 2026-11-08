@@ -109,13 +109,12 @@ impl InputClass {
             return class;
         }
         match action {
-            Action::Character { .. } | Action::GridKey(_) | Action::Glide { .. } => Self::Character,
+            Action::Character { .. } | Action::Glide { .. } => Self::Character,
             Action::Punctuation(_) | Action::PunctuationAscii(_) => Self::Punctuation,
             Action::Select(_)
             | Action::SelectAnyCandidate(_)
             | Action::SelectEdge(..)
-            | Action::SelectHighlighted
-            | Action::ChooseNineKeySpelling(_) => Self::Selection,
+            | Action::SelectHighlighted => Self::Selection,
             Action::NextPage
             | Action::PreviousPage
             | Action::NextCandidate
@@ -125,8 +124,7 @@ impl InputClass {
             | Action::FirstCandidateOrHome => Self::Navigation,
             Action::SegmentBackspace
             | Action::SegmentMoveLeft
-            | Action::SegmentMoveRight
-            | Action::GridHelpcode(_) => Self::Edit,
+            | Action::SegmentMoveRight => Self::Edit,
             Action::Finish | Action::FinishOnFocusLoss => Self::Commit,
             Action::Command(command) => match command {
                 Command::Backspace
@@ -148,8 +146,7 @@ impl InputClass {
             | Action::PinCandidate(_)
             | Action::RemoveCandidate(_)
             | Action::FixCandidatePosition(..)
-            | Action::ClearCandidatePosition(_)
-            | Action::SetNineKeyFilter { .. } => Self::Other,
+            | Action::ClearCandidatePosition(_) => Self::Other,
         }
     }
 }
@@ -1209,8 +1206,7 @@ fn typed_char(action: &msime_input_runtime::Action) -> Option<char> {
     match action {
         Action::Character { value, .. }
         | Action::Punctuation(value)
-        | Action::PunctuationAscii(value)
-        | Action::GridKey(value) => Some(char::from(*value)),
+        | Action::PunctuationAscii(value) => Some(char::from(*value)),
         _ => None,
     }
 }

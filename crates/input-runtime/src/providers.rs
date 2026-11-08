@@ -15,10 +15,7 @@ pub fn cloud_request_url(query: &OnlineQuery) -> Option<String> {
             && request.method == msime_client_core::cloud::candidates::CloudHttpMethod::Get)
             .then(|| request.url.clone());
     }
-    msime_client_core::cloud::candidates::build_google_url(
-        &query.query_text,
-        SchemeType::from_u8(query.scheme) == Some(SchemeType::JapaneseRomaji),
-    )
+    msime_client_core::cloud::candidates::build_google_url(&query.query_text, false)
 }
 
 /// Whether a cloud provider may answer `query`: the query asks for cloud candidates and its scheme is one a cloud provider converts. Korean syllables, for one, are already the text, so a query claiming eligibility for them is refused, as is one naming a scheme the Engine does not have.
@@ -609,50 +606,6 @@ impl UnixSocketProvider {
         .then(|| polished.to_owned())
     }
 
-    /// Ask the user-owned handwriting recognizer for up to twelve candidates.
-    /// The Linux panel owns ink capture and presentation; this service owns
-    /// model selection and any platform-specific recognizer integration.
-    pub fn handwriting(&self, query: HandwritingQuery) -> Option<Vec<String>> {
-        if !msime_client_core::is_bounded_text(&query.language, 64)
-            || query.strokes.is_empty()
-            || query.strokes.len() > 32
-            || query.strokes.iter().any(|stroke| {
-                stroke.is_empty()
-                    || stroke.len() > 512
-                    || stroke
-                        .iter()
-                        .any(|point| !point.x.is_finite() || !point.y.is_finite())
-            })
-        {
-            return None;
-        }
-        let request = json!({"version": 1, "kind": "handwriting", "query": query}).to_string();
-        if request.len() > 262_144 {
-            return None;
-        }
-        let mut stream = self.connect()?;
-        let line = exchange_panel_request(
-            &mut stream,
-            &request,
-            524_288,
-            std::time::Duration::from_millis(500),
-        )?;
-        #[derive(Deserialize)]
-        struct Reply {
-            candidates: Vec<String>,
-        }
-        let reply: Reply = serde_json::from_str(&line).ok()?;
-        if reply.candidates.len() > 12
-            || reply.candidates.iter().any(|candidate| {
-                candidate.is_empty() || !msime_client_core::is_bounded_text(candidate, 4096)
-            })
-        {
-            return None;
-        }
-        Some(msime_engine::order_handwriting_candidates(
-            &reply.candidates,
-        ))
-    }
 
     /// Search the user-owned emoji catalog. Results stay outside the IBus
     /// session and can be rendered by any desktop panel toolkit.

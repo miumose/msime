@@ -11,8 +11,45 @@ use crate::dictionary::english::{
     load_custom_translations, upsert_gloss, CustomTranslations, EnglishDictionary,
 };
 use crate::error::{EngineError, Result};
-use crate::japanese::decoder::FileIdentity;
 use crate::types::CandidateSource;
+
+/// 判断同一路径上的文件是否换过：长度和修改时间，unix 上加设备号和 inode，Windows 上加创建时间。rename 进来的新文件 inode 一定不同，长度和修改时间也几乎一定不同。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(windows)]
+    created: u64,
+}
+
+impl FileIdentity {
+    fn of(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        #[cfg(windows)]
+        use std::os::windows::fs::MetadataExt;
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+            #[cfg(windows)]
+            created: metadata.creation_time(),
+        }
+    }
+
+    /// 路径上此刻那个普通文件的身份；不存在、不是普通文件（含符号链接）时为 `None`。
+    fn at(path: &Path) -> Option<Self> {
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        metadata.file_type().is_file().then(|| Self::of(&metadata))
+    }
+}
 
 /// Senses shown beside a candidate; the rest of a dictionary gloss is cut (bridge.cpp:209).
 const MAXIMUM_GLOSS_SENSES: usize = 2;

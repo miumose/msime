@@ -1,5 +1,4 @@
 #include "EngineSessionAdapter.h"
-#include "../common/HostOnlineCandidateSync.h"
 #include "../../common/HostApiString.h"
 #include "../common/PanelCharacter.h"
 #include "../common/PhrasePreeditOptions.h"
@@ -7,13 +6,6 @@
 namespace msime::tsf {
 using json = nlohmann::json;
 EngineSessionAdapter::EngineSessionAdapter() = default;
-void EngineSessionAdapter::capture_online_request(uint64_t request) {
-  if (!online_) online_ = std::make_unique<msime::windows::HostOnlineCandidateSync>();
-  online_->capture(*this, request);
-}
-bool EngineSessionAdapter::apply_online_update(const std::string &payload) {
-  return online_ && online_->apply(*this, payload);
-}
 EngineSessionAdapter::~EngineSessionAdapter() { destroy(); }
 bool EngineSessionAdapter::response(char *raw, std::string *out,
                                     std::string *error) const {

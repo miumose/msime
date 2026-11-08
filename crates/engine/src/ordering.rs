@@ -532,9 +532,6 @@ pub fn rerank_needs_model<'a, R: OrderRowSource<'a> + ?Sized>(
     if !reorders_candidates(scheme) {
         return false;
     }
-    if scheme_type(scheme) == Some(SchemeType::Wubi) && !answered_by_pinyin_fallback {
-        return false;
-    }
     if rows.len() < 2 {
         return false;
     }
@@ -673,7 +670,7 @@ pub fn opening_particle_pick<'a, R: OrderRowSource<'a> + ?Sized>(
     scheme: u8,
     rows: &'a R,
 ) -> Option<usize> {
-    if !reorders_candidates(scheme) || scheme_type(scheme) == Some(SchemeType::Wubi) {
+    if !reorders_candidates(scheme) {
         return None;
     }
     if rows.len() < 2 || !crate::lattice::decode::opens_sentence(context) {
@@ -940,10 +937,7 @@ pub fn runner_up_order_pooled<'a, R: OrderRowSource<'a> + ?Sized>(
     };
     // 整句池让引擎挪过座位时（见 [`runner_up_order_pooled`]），字数不同、同样读满整串的词网格行是另一种切分的读法。只有全拼和五笔的拼音回退走全拼引擎的整句池。
     let pooled = pool > crate::lattice::decode::SENTENCE_PATHS
-        && matches!(
-            scheme_type(scheme),
-            Some(SchemeType::Quanpin | SchemeType::Wubi)
-        );
+        && scheme_type(scheme) == Some(SchemeType::Quanpin);
     let other_reading = |index: usize| {
         let row = rows.get(index);
         let characters = row.text.chars().count();
@@ -1353,19 +1347,6 @@ mod tests {
     }
 
     #[test]
-    fn only_korean_keeps_its_table_order() {
-        let korean = SchemeType::Korean as u8;
-        assert!(!reorders_candidates(korean));
-        for ordinal in (0..=u8::MAX).filter(|&ordinal| ordinal != korean) {
-            if let Some(scheme) = SchemeType::from_u8(ordinal) {
-                assert_eq!(reorders_candidates(ordinal), scheme.holds_phrase_progress());
-            }
-        }
-        // 刷新失败时的占位快照不对应任何方案，照旧允许重排。
-        assert!(reorders_candidates(255));
-    }
-
-    #[test]
     fn only_shuangpin_corrections_stay_behind() {
         let shuangpin = SchemeType::Shuangpin as u8;
         assert!(!corrections_may_lead(shuangpin));
@@ -1396,49 +1377,6 @@ mod tests {
             row("你", 0),
         ];
         assert_eq!(runner_up_order(0, &rows), Some(vec![0, 2, 1]));
-    }
-
-    /// wenjian：首条读法是两字的 wen'jian，整句池把另一种切分 wen'ji'an 的三字读法放在主切分整句的座位上。降位后它们不再排在读满整串的词库词前面：排在最前的「问及按」坐到最后一个整串词库词「稳健」之后，其余挪到表尾。
-    #[test]
-    fn readings_of_another_segmentation_go_behind_the_words() {
-        let partial = |text| OrderRow {
-            answers_key: false,
-            ..row(text, 0)
-        };
-        let rows = [
-            row("文件", 0),
-            row("问间", LATTICE_SOURCE),
-            row("问及按", LATTICE_SOURCE),
-            row("文集按", LATTICE_SOURCE),
-            partial("文件夹"),
-            row("稳健", 0),
-            row("问见", LATTICE_SOURCE),
-            partial("文"),
-        ];
-        assert_eq!(
-            runner_up_order_pooled(0, &rows, &[], 32),
-            Some(vec![0, 1, 4, 5, 2, 7, 3, 6])
-        );
-        // 五笔混输拼音走同一个全拼引擎，同一条规则。
-        assert_eq!(
-            runner_up_order_pooled(SchemeType::Wubi as u8, &rows, &[], SENTENCE_POOL),
-            Some(vec![0, 1, 4, 5, 2, 7, 3, 6])
-        );
-        // 没有整句池时引擎没挪过座位，照旧只按字数认：三字读法留在原位。
-        assert_eq!(
-            runner_up_order(0, &rows),
-            Some(vec![0, 1, 2, 3, 4, 5, 7, 6])
-        );
-        assert_eq!(
-            runner_up_order_pooled(0, &rows, &[], 6),
-            runner_up_order(0, &rows)
-        );
-        // 双拼不走全拼引擎的整句池。
-        let shuangpin = SchemeType::Shuangpin as u8;
-        assert_eq!(
-            runner_up_order_pooled(shuangpin, &rows, &[], 32),
-            runner_up_order(shuangpin, &rows)
-        );
     }
 
     /// wuliji：首条读法三个字，后面留的两条只从同一种切分的读法里取。另一种切分排在最前的读法后面没有读满整串的词库词时留在原位，其余挪到表尾。
@@ -1581,28 +1519,6 @@ mod tests {
         assert_eq!(
             runner_up_order_with(shuangpin, &rows, &supported),
             Some(vec![0, 1, 2, 4, 6, 7, 3, 5])
-        );
-    }
-
-    #[test]
-    fn runner_up_order_leaves_lists_it_has_no_say_over() {
-        let korean = SchemeType::Korean as u8;
-        let rows = [
-            row("你好", LATTICE_SOURCE),
-            row("倪好", LATTICE_SOURCE),
-            row("你", 0),
-        ];
-        assert_eq!(runner_up_order(korean, &rows), None);
-        // 少于两行、没有整句读法、整句只有一个字（假名）、或排列不变时都返回 None。
-        assert_eq!(runner_up_order(0, &rows[..1]), None);
-        assert_eq!(runner_up_order(0, &[row("你", 0), row("尼", 0)]), None);
-        assert_eq!(
-            runner_up_order(0, &[row("あ", LATTICE_SOURCE), row("ア", LATTICE_SOURCE)]),
-            None
-        );
-        assert_eq!(
-            runner_up_order(0, &[row("你好", LATTICE_SOURCE), row("你", 0)]),
-            None
         );
     }
 

@@ -15,5 +15,4 @@ pub mod removal;
 pub mod replay;
 pub mod reset;
 pub mod state;
-pub mod typo_profile;
-pub(crate) mod wubi_learning;
+pub mod typo_profile; 

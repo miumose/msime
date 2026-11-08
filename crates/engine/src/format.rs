@@ -11,12 +11,12 @@ pub const FORMAT_VERSION: i32 = 1;
 /// 没有 `metadata` 表的文件按这个版本读：文件内版本出现之前发布的词库（`dict-v2.0.39` 及更早）都是这样，必须照常能用。
 pub const LEGACY_FORMAT_VERSION: i32 = 0;
 
-/// 三个主库的 `metadata` 表，形状与语言词库（`language_dictionary::SCHEMA`）的同名表相同：`name` 是键，`value` 是十进制文本。
+/// 三个主库的 `metadata` 表：`name` 是键，`value` 是十进制文本。
 pub const METADATA_SCHEMA: &str =
     "CREATE TABLE IF NOT EXISTS metadata(name TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;";
 
-/// `metadata` 里存放格式版本的那一行，与语言词库同名。
-pub const METADATA_FORMAT_VERSION: &str = crate::language_dictionary::METADATA_FORMAT_VERSION;
+/// `metadata` 里存放格式版本的那一行。
+pub const METADATA_FORMAT_VERSION: &str = "format_version";
 
 /// `msime-pinyin.db` 里可选的「不拿来拼整句的词」表（`docs/data-formats.md` §4.5）：dict-builder 从 msime-dictionary 的 `curation/offensive-words.txt` 写入，`value` 是词或豁免写法，`exempt` 为 1 表示豁免写法。只追加的新表，不改 `FORMAT_VERSION`：旧引擎不认识它也不读它，新引擎读不到它就用编进引擎的表。
 pub const SENTENCE_EXCLUDED_TABLE: &str = "sentence_excluded";

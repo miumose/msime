@@ -382,7 +382,6 @@ impl CandidateQueries {
         local_mode: LocalInputMode,
         english_may_lead: bool,
         symbols_allowed: bool,
-        japanese: Option<MixedJapaneseRow>,
         first_page_rows: usize,
         mixed_enabled: bool,
     ) -> Vec<WordItem> {
@@ -390,8 +389,7 @@ impl CandidateQueries {
             && (english.mixed_candidates
                 || expressive.emoji_candidates
                 || expressive.kaomoji_candidates
-                || (expressive.symbol_candidates && symbols_allowed)
-                || japanese.is_some());
+                || (expressive.symbol_candidates && symbols_allowed));
         if !anything_enabled
             || dedicated_english
             || local_mode != LocalInputMode::None
@@ -486,7 +484,7 @@ impl CandidateQueries {
             kaomoji_rows,
             symbol_rows,
             english_lead,
-            japanese,
+            None,
             english.first_page_count,
             first_page_rows,
         );
@@ -931,75 +929,6 @@ mod tests {
         assert_eq!(allocations, 0);
     }
 
-    #[test]
-    fn mixed_skips_unused_expressive_database_path_allocations() {
-        let paths = RuntimePaths {
-            resources: "/synthetic/msime-unused-mixed-resources".into(),
-            ..RuntimePaths::default()
-        };
-        let english = EnglishInputOptions {
-            mixed_candidates: true,
-            minimum_prefix: usize::MAX,
-            first_page_count: 1,
-        };
-        for (prefix, english, expressive, with_japanese) in [
-            ("ni", english, MixedExpressiveOptions::default(), false),
-            (
-                "n",
-                EnglishInputOptions::default(),
-                MixedExpressiveOptions {
-                    emoji_candidates: true,
-                    kaomoji_candidates: true,
-                    symbol_candidates: true,
-                },
-                false,
-            ),
-            (
-                "ni",
-                EnglishInputOptions::default(),
-                MixedExpressiveOptions::default(),
-                true,
-            ),
-        ] {
-            let mut queries = CandidateQueries::new(&paths, default_profile());
-            // 短完整词也会查询英文；先初始化词库，只计混排阶段的无用表情路径分配。
-            if english.mixed_candidates {
-                queries.english_dictionary();
-            }
-            let mut candidates = Vec::with_capacity(3);
-            candidates.extend(chinese());
-            let expected = candidates.clone();
-            let japanese = with_japanese.then(|| japanese("合成日文", false).unwrap());
-            let (mixed, allocations) = crate::ime::personal_rerank::allocations::count(|| {
-                queries.mixed(
-                    candidates,
-                    prefix,
-                    SchemeType::Quanpin,
-                    english,
-                    expressive,
-                    false,
-                    LocalInputMode::None,
-                    true,
-                    true,
-                    japanese,
-                    6,
-                    true,
-                )
-            });
-
-            assert_eq!(mixed.capacity(), 3);
-            if with_japanese {
-                assert_eq!(mixed[0], expected[0]);
-                assert_eq!(mixed[1].word, "合成日文");
-                assert_eq!(mixed[1].source, CandidateSource::MixedJapanese);
-                assert_eq!(mixed[2], expected[1]);
-            } else {
-                assert_eq!(mixed, expected);
-            }
-            assert_eq!(allocations, 0, "无需表情词库时仍分配了路径：{allocations}");
-        }
-    }
-
     fn row(word: &str, source: CandidateSource) -> WordItem {
         WordItem::new("ni", word, 1, source, "")
     }
@@ -1403,105 +1332,6 @@ mod tests {
     }
 
     #[test]
-    fn mixed_passes_through_when_it_does_not_apply() {
-        let mut queries = CandidateQueries::new(&RuntimePaths::default(), default_profile());
-        let on = EnglishInputOptions {
-            mixed_candidates: true,
-            minimum_prefix: 2,
-
-            first_page_count: 1,
-        };
-        let expressive_on = MixedExpressiveOptions {
-            emoji_candidates: true,
-            kaomoji_candidates: true,
-            symbol_candidates: true,
-        };
-        let cases = [
-            (
-                SchemeType::Quanpin,
-                EnglishInputOptions::default(),
-                MixedExpressiveOptions::default(),
-                false,
-                LocalInputMode::None,
-                "ni",
-            ),
-            (
-                SchemeType::Wubi,
-                on,
-                expressive_on,
-                false,
-                LocalInputMode::None,
-                "ni",
-            ),
-            (
-                SchemeType::JapaneseRomaji,
-                on,
-                expressive_on,
-                false,
-                LocalInputMode::None,
-                "ni",
-            ),
-            (
-                SchemeType::Korean,
-                on,
-                expressive_on,
-                false,
-                LocalInputMode::None,
-                "ni",
-            ),
-            (
-                SchemeType::Quanpin,
-                on,
-                expressive_on,
-                true,
-                LocalInputMode::None,
-                "ni",
-            ),
-            (
-                SchemeType::Shuangpin,
-                on,
-                expressive_on,
-                false,
-                LocalInputMode::Emoji,
-                "ni",
-            ),
-            (
-                SchemeType::Quanpin,
-                on,
-                expressive_on,
-                false,
-                LocalInputMode::None,
-                "",
-            ),
-        ];
-        for (scheme, english, expressive, dedicated, local, prefix) in cases {
-            let list = queries.mixed(
-                chinese(),
-                prefix,
-                scheme,
-                english,
-                expressive,
-                dedicated,
-                local,
-                true,
-                true,
-                None,
-                6,
-                true,
-            );
-            assert_eq!(
-                list,
-                chinese(),
-                "{scheme:?} {dedicated} {local:?} {prefix:?}"
-            );
-        }
-        assert!(
-            queries.english.is_none(),
-            "no pass-through opens the English dictionary"
-        );
-    }
-
-    #[test]
     fn temporary_english_reserves_the_generated_row_capacity() {
         let directory = tempfile::tempdir().unwrap();
         let words = [
@@ -1539,238 +1369,11 @@ mod tests {
         assert_eq!(candidates.capacity(), 11);
     }
 
-    fn japanese(word: &str, lead: bool) -> Option<MixedJapaneseRow> {
-        let mut item = WordItem::new("kaishi", word, 0, CandidateSource::MixedJapanese, "");
-        item.scheme = SchemeType::JapaneseRomaji;
-        Some(MixedJapaneseRow { item, lead })
-    }
-
     fn kaishi_chinese() -> Vec<WordItem> {
         vec![
             WordItem::new("kaishi", "开始", 1, CandidateSource::Database, "kai'shi"),
             WordItem::new("kai", "开", 1, CandidateSource::Database, "kai"),
         ]
-    }
-
-    /// 领先的日文行占首位；不领先时进优先位置，排在英文那一行前面；emoji 照旧接在它描绘的词后面。
-    #[test]
-    fn a_japanese_row_leads_or_takes_the_priority_slot_ahead_of_english() {
-        let led = insert_mixed_rows_with_japanese(
-            kaishi_chinese(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            japanese("開始", true),
-            1,
-            0,
-        );
-        assert_eq!(words(&led), vec!["開始", "开始", "开"]);
-
-        let slotted = insert_mixed_rows_with_japanese(
-            kaishi_chinese(),
-            vec![english("kaishi", "kaishi")],
-            vec![depicting("🎬", CandidateSource::Emoji, "开始")],
-            Vec::new(),
-            Vec::new(),
-            None,
-            japanese("開始", false),
-            1,
-            0,
-        );
-        assert_eq!(words(&slotted), vec!["开始", "🎬", "開始", "kaishi", "开"]);
-
-        // 只有一行中文时，不领先的日文跟在它后面、英文前面。
-        let short = insert_mixed_rows_with_japanese(
-            vec![WordItem::new(
-                "kaishi",
-                "开始",
-                1,
-                CandidateSource::Database,
-                "kai'shi",
-            )],
-            vec![english("kaishi", "kaishi")],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            japanese("開始", false),
-            1,
-            0,
-        );
-        assert_eq!(words(&short), vec!["开始", "開始", "kaishi"]);
-    }
-
-    /// 英文按拼音拆不开、完全匹配占了首位时，领先的日文排第二。
-    #[test]
-    fn a_leading_japanese_row_follows_a_leading_english_word() {
-        let list = insert_mixed_rows_with_japanese(
-            hello_chinese(),
-            vec![english("hello", "hello")],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Some("hello"),
-            japanese("へっぉ", true),
-            1,
-            0,
-        );
-        assert_eq!(words(&list), vec!["hello", "へっぉ", "何咯", "和"]);
-        // 英文没有领先（只是补全）时日文占首位。
-        let list = insert_mixed_rows_with_japanese(
-            hello_chinese(),
-            vec![english("hellos", "hellos")],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Some("hello"),
-            japanese("へっぉ", true),
-            1,
-            0,
-        );
-        assert_eq!(words(&list), vec!["へっぉ", "何咯", "hellos", "和"]);
-    }
-
-    /// 有云候选时，不领先的日文和英文一样往后让，领先的仍在首位；AI 行（引擎排在最后）不让它再往后。
-    #[test]
-    fn japanese_rows_respect_the_cloud_seat() {
-        let slot = 2;
-        for ai in [None, Some(CandidateSource::AiSuggestion)] {
-            let with_online = || {
-                let mut list = kaishi_chinese();
-                list.insert(1, row("云", CandidateSource::CloudSuggestion));
-                if let Some(ai) = ai {
-                    list.push(row("智", ai));
-                }
-                list
-            };
-            let slotted = insert_mixed_rows_with_japanese(
-                with_online(),
-                vec![english("kaishi", "kaishi")],
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                None,
-                japanese("開始", false),
-                1,
-                0,
-            );
-            assert_eq!(slotted[slot].word, "開始", "{ai:?} {:?}", words(&slotted));
-            assert_eq!(slotted[slot + 1].word, "kaishi", "{ai:?}");
-            let led = insert_mixed_rows_with_japanese(
-                with_online(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                None,
-                japanese("開始", true),
-                1,
-                0,
-            );
-            assert_eq!(led[0].word, "開始", "{ai:?}");
-        }
-    }
-
-    /// 日文文字和已有候选（含混进来的英文）重复时不加。
-    #[test]
-    fn a_duplicate_japanese_row_is_dropped() {
-        let mut list = kaishi_chinese();
-        list.push(WordItem::new(
-            "kaishi",
-            "開始",
-            1,
-            CandidateSource::Database,
-            "kai'shi",
-        ));
-        let merged = insert_mixed_rows_with_japanese(
-            list,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            japanese("開始", true),
-            1,
-            0,
-        );
-        assert_eq!(words(&merged), vec!["开始", "开", "開始"]);
-        assert!(merged
-            .iter()
-            .all(|item| item.source != CandidateSource::MixedJapanese));
-
-        let merged = insert_mixed_rows_with_japanese(
-            kaishi_chinese(),
-            vec![english("kaishi", "OK")],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            japanese("OK", false),
-            1,
-            0,
-        );
-        assert_eq!(words(&merged), vec!["开始", "OK", "开"]);
-        assert_eq!(merged[1].source, CandidateSource::EnglishDictionary);
-    }
-
-    /// 只开了日文混输（英文、emoji、颜文字都关）时 `mixed` 也要把日文行混进去。
-    #[test]
-    fn mixed_inserts_a_japanese_row_with_everything_else_off() {
-        let mut queries = CandidateQueries::new(
-            &RuntimePaths::default(),
-            crate::shuangpin::profile::default_profile(),
-        );
-        let list = queries.mixed(
-            kaishi_chinese(),
-            "kaishi",
-            SchemeType::Quanpin,
-            EnglishInputOptions::default(),
-            MixedExpressiveOptions::default(),
-            false,
-            LocalInputMode::None,
-            true,
-            true,
-            japanese("開始", false),
-            6,
-            true,
-        );
-        assert_eq!(words(&list), vec!["开始", "開始", "开"]);
-    }
-
-    /// 候选混输总开关（`SessionOptions::mixed_candidates`，Windows `utility.mixed_candidates`）关掉时，
-    /// 英文、emoji、颜文字、符号和日文行各分成员照常传进来也不查，列表原样返回。
-    #[test]
-    fn the_mixed_candidates_master_switch_gates_every_member() {
-        let mut queries = CandidateQueries::new(
-            &RuntimePaths::default(),
-            crate::shuangpin::profile::default_profile(),
-        );
-        let candidates = kaishi_chinese();
-        let expected = words(&candidates);
-        let list = queries.mixed(
-            candidates.clone(),
-            "kaishi",
-            SchemeType::Quanpin,
-            EnglishInputOptions {
-                mixed_candidates: true,
-                ..EnglishInputOptions::default()
-            },
-            MixedExpressiveOptions {
-                emoji_candidates: true,
-                kaomoji_candidates: true,
-                symbol_candidates: true,
-            },
-            false,
-            LocalInputMode::None,
-            true,
-            true,
-            japanese("開始", false),
-            6,
-            false,
-        );
-        assert_eq!(words(&list), expected);
     }
 
     /// 英文库里的一行：`key` 是小写词，`display` 是显示的写法。
@@ -1953,7 +1556,6 @@ mod tests {
             EnglishInputOptions {
                 mixed_candidates: true,
                 minimum_prefix,
-
                 first_page_count: 1,
             },
             MixedExpressiveOptions::default(),
@@ -1961,7 +1563,6 @@ mod tests {
             LocalInputMode::None,
             english_may_lead,
             true,
-            None,
             6,
             true,
         )
@@ -2440,52 +2041,4 @@ mod tests {
         assert_eq!(words(&merged), vec!["嘎嘛", "gamma", "γ", "噶"]);
     }
 
-    #[test]
-    fn mixed_adds_symbols_only_when_switched_on_and_allowed() {
-        let mut queries = CandidateQueries::new(&RuntimePaths::default(), default_profile());
-        let list = || database(&["政府", "正负", "正副"]);
-        let symbols_on = MixedExpressiveOptions {
-            symbol_candidates: true,
-            ..MixedExpressiveOptions::default()
-        };
-        let mix = |queries: &mut CandidateQueries, expressive, allowed, scheme| {
-            queries.mixed(
-                list(),
-                "zhengfu",
-                scheme,
-                EnglishInputOptions::default(),
-                expressive,
-                false,
-                LocalInputMode::None,
-                true,
-                allowed,
-                None,
-                6,
-                true,
-            )
-        };
-        assert_eq!(
-            words(&mix(&mut queries, symbols_on, true, SchemeType::Quanpin)),
-            vec!["政府", "正负", "±", "正副"]
-        );
-        // 开关关着、调用方不允许（光标前缀解码、辅助码激活）、五笔：列表原样。
-        assert_eq!(
-            mix(
-                &mut queries,
-                MixedExpressiveOptions::default(),
-                true,
-                SchemeType::Quanpin
-            ),
-            list()
-        );
-        assert_eq!(
-            mix(&mut queries, symbols_on, false, SchemeType::Quanpin),
-            list()
-        );
-        assert_eq!(
-            mix(&mut queries, symbols_on, true, SchemeType::Wubi),
-            list()
-        );
-        assert!(queries.english.is_none());
-    }
 }
