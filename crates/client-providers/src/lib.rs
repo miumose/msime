@@ -6,7 +6,5 @@ use msime_client_base::text::{is_ascii_alphanumeric_dash, is_lower_hex};
 use msime_client_base::{bounded_io, file_lock, storage, text};
 use msime_client_core::{endpoint, preferences, resources, translation};
 
-pub mod dictionary_updates;
 pub mod proxy;
 pub mod local_models;
-pub mod resource_packs;

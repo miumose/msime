@@ -1051,17 +1051,10 @@ fn load_onnx_reranker(directory: &Path) -> Option<msime_onnx_rerank::OnnxScorer>
     .ok()
 }
 
-pub mod account;
-pub mod ai_skin;
 pub mod android_data;
 pub mod candidate_colors;
 pub mod candidates;
-pub mod chat_stream;
-pub mod cloud_dictionary;
-pub mod cloud_sync;
-pub mod community;
 pub mod credentials;
-pub mod dictionary_sync;
 pub mod google;
 #[cfg(not(target_os = "android"))]
 pub mod handwriting;
@@ -1071,16 +1064,11 @@ pub mod input;
 pub mod ios_settings;
 pub mod lifecycle;
 pub mod local_translation;
-pub mod mcp;
-pub mod moderation;
 pub mod pack_downloads;
-pub mod plugins;
 pub mod providers;
-pub mod reporting;
 pub mod session;
 pub mod session_store;
 pub mod settled;
-pub mod skin_image;
 pub mod spacing;
 pub mod translation;
 pub mod user_words;
@@ -1097,18 +1085,14 @@ pub use android_data::*;
 pub use candidate_colors::*;
 pub use candidates::*;
 pub use credentials::*;
-pub use dictionary_sync::*;
 pub use host::*;
 pub use input::*;
 pub use lifecycle::*;
 pub use local_translation::*;
-pub use mcp::*;
 pub use pack_downloads::*;
-pub use plugins::*;
 pub use providers::*;
 pub use session::*;
 pub use settled::*;
-pub use skin_image::*;
 pub use translation::*;
 pub use user_words::*;
 #[cfg(windows)]

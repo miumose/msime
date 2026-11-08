@@ -11,10 +11,8 @@ rust-version.workspace = true
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-local-translation = ["dep:msime-local-translation"]
 telemetry-loopback = ["msime-client-services/telemetry-loopback"]
 # 随包资源目录旁边有 `rerank-model/`（`lm_step.ort`、`model.json`、`vocab.json`）时，整句联想「增强」的逐键重排改用它，没有或读不了时照旧用随包的句子模型。
-onnx-rerank = ["dep:msime-onnx-rerank"]
 
 [dependencies]
 msime-client-core = { path = "../client-core" }
@@ -32,8 +30,6 @@ tempfile.workspace = true
 sha2.workspace = true
 time = { workspace = true, features = ["local-offset"] }
 libc.workspace = true
-# 按键重排的 ONNX Runtime 模型后端，`onnx-rerank` 特性打开时才编：要链接按模型算子清单精简构建的 ONNX Runtime（`ORT_LIB_LOCATION`），见 `crates/onnx-rerank`。
-msime-onnx-rerank = { path = "../onnx-rerank", features = ["runtime"], optional = true }
 
 # Desktop hosts only; the mobile hosts do this natively. OpenHarmony reports target_os = "linux" and has no ALSA to link.
 #
@@ -48,8 +44,6 @@ symphonia = { version = "0.6.1", default-features = false, features = ["wav", "p
 
 # 脚本插件的解释器和 ABI v1 校验（`scripts`），只在会运行脚本的桌面目标上编译：macOS、Windows 和非 ohos 的 Linux。iOS、Android、HarmonyOS 和 wasm32 的产物里没有它；Windows TIP 加载的是同一份 DLL，代码在但从不执行，因为 TIP 从不调用 `msime_client_scripts_enable`。
 [target.'cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", not(target_env = "ohos"))))'.dependencies]
-msime-script-runtime = { path = "../script-runtime" }
-msime-local-translation = { path = "../local-translation", features = ["runtime"], optional = true }
 
 [dev-dependencies]
 msime-path-trust = { path = "../path-trust", features = ["test-support"] }
@@ -59,7 +53,6 @@ rusqlite.workspace = true
 
 # 脚本插件的测试用 WAT 写模块（`test-support` 打开 wasmi 的 `wat` 特性），仓库不提交 `.wasm`。
 [target.'cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", not(target_env = "ohos"))))'.dev-dependencies]
-msime-script-runtime = { path = "../script-runtime", features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]
 # The clipboard read behind 从系统剪贴板同步 (`clipboard_history::windows_clipboard_text`): the same privacy-marker check the Tauri shell and the Server's capture use.

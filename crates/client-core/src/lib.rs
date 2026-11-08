@@ -27,7 +27,6 @@ use msime_client_base::bounded_io;
 pub use msime_client_base::calendar;
 pub mod candidate_document;
 pub use msime_client_base::chinese_conversion;
-pub mod clipboard;
 pub mod cloud;
 pub mod edition;
 #[doc(hidden)]
@@ -40,7 +39,6 @@ pub mod jianpin_slash;
 pub mod key_chord;
 pub mod keyboard_skin;
 pub mod language_cycle;
-pub mod local_translation;
 pub mod network;
 pub mod oobe;
 pub mod panels;
@@ -62,5 +60,3 @@ pub use text::{
     is_bounded_text_with_options, is_bounded_utf16, is_hex_color, is_lower_hex,
 };
 pub mod theme;
-pub mod translation;
-pub mod world_clock;
