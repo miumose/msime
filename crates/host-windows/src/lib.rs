@@ -23,7 +23,6 @@ mod grouped_panel_key;
 pub mod ink;
 mod send_input_marker;
 pub use grouped_panel_key::{send_grouped_key, GroupedKeyError};
-pub mod voice_controller;
 
 use std::path::Path;
 use std::time::Duration;
