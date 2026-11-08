@@ -48,8 +48,6 @@ std::wstring Utf8ToWide(const std::string &value)
     return result;
 }
 
-#endif
-
 // 豆包 v1 帧由共享宿主库（crates/client-providers/src/voice/doubao_frame.rs）构造和解码，其他所有宿主用的也是这个编解码器。每个构造函数调用两次：第一次不给缓冲区，用来得知帧的大小，第二次再写入。
 template <typename Build> std::vector<std::uint8_t> BuildFrame(Build build)
 {
@@ -85,8 +83,6 @@ bool SendBinary(HINTERNET websocket, const std::vector<std::uint8_t> &packet)
                                                    const_cast<std::uint8_t *>(packet.data()),
                                                    static_cast<DWORD>(packet.size())) == NO_ERROR;
 }
-
-#endif
 
 struct ParsedResponse
 {
@@ -199,7 +195,6 @@ HINTERNET ConnectWebSocket(const std::string &endpoint, const std::string &auth_
         return nullptr;
     return WinHttpWebSocketCompleteUpgrade(request.value, 0);
 }
-#endif
 } // namespace
 
 DoubaoAsrClient::DoubaoAsrClient(std::string endpoint, std::string auth_mode, std::string app_key, std::string access_key,
