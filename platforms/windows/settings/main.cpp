@@ -4337,9 +4337,6 @@ private:
       theme_carousel_key_.clear();
       skin_preview_overrides_.clear();
     }
-    // 进入「语音输入」页时停在「录音行为」标签上，也要重读录音设备：共享页的「麦克风」下拉每次变为可见时都读一次（标签之间切换见 build_voice_page）。
-    if (false)
-      capture_stale_ = true;
     // 离开语音页时「服务配置」子视图随之关上（共享页隐藏时的 resetServiceSubview），回来时在「识别与输入」。
     current_page_ = id;
     select_navigation_item();
@@ -24250,6 +24247,119 @@ private:
       }
     return tiles;
   }
+
+  static void append_run(TextBlock const &block, std::wstring const &value) {
+    Documents::Run run;
+    run.Text(hstring(value));
+    block.Inlines().Append(run);
+  }
+
+  // 「从文件导入」的打开对话框（与 Tauri 的 voice_local_model_import 相同的标题）：可以多选，不按扩展名过滤，下载工具可能改过名，认文件靠内容。返回空时用户关掉了对话框，或对话框打不开、读不到所选的文件，后两种把错误写进 `failure`，由调用方说明，不再和取消一样什么都不显示。所选文件都没有本机路径时返回空列表。
+  std::optional<std::vector<std::wstring>> pick_model_files(HRESULT &failure) {
+    failure = S_OK;
+    com_ptr<IFileOpenDialog> dialog;
+    if (failure = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(dialog.put()));
+        FAILED(failure))
+      return std::nullopt;
+    FILEOPENDIALOGOPTIONS options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetTitle(L"选择下载好的模型文件");
+    dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+    if (const HRESULT shown = dialog->Show(GetActiveWindow()); shown != S_OK) {
+      if (shown != HRESULT_FROM_WIN32(ERROR_CANCELLED))
+        failure = FAILED(shown) ? shown : E_UNEXPECTED;
+      return std::nullopt;
+    }
+    com_ptr<IShellItemArray> items;
+    if (failure = dialog->GetResults(items.put()); FAILED(failure))
+      return std::nullopt;
+    DWORD count = 0;
+    if (failure = items->GetCount(&count); FAILED(failure))
+      return std::nullopt;
+    std::vector<std::wstring> files;
+    for (DWORD index = 0; index < count; ++index) {
+      com_ptr<IShellItem> item;
+      if (FAILED(items->GetItemAt(index, item.put())))
+        continue;
+      PWSTR raw = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &raw)) && raw)
+        files.emplace_back(raw);
+      CoTaskMemFree(raw);
+    }
+    return files;
+  }
+
+  void build_hand_page(StackPanel const &page) {
+    auto group = add_group(page, L"手写识别板");
+    shell_row(group, 0xE929, L"打开手写识别板", L"使用鼠标或触控方式手写输入，自动识别候选汉字",
+              L"打开", nav::shell_links::handwriting_panel);
+    if (!indexing_)
+      group.Children().Append(make_handwriting_preview_card());
+  }
+
+  // 「手写识别板」组的预览，照共享页的 SettingsPreviewBlock 和 panel-surface-style.ts 的手写板示意（`mock`）：与屏幕键盘预览一样的卡片和「预览」小字，下面是最宽 560、居中的示意，一块至少 230 高、12 圆角、虚线描边的画布，中间一个 110 DIP、向左倾 7° 的楷体「水」当作笔迹，再下面相隔 10 是一排四个等宽候选「水 永 木 未」（6 圆角、细描边、8 内边距、相隔 8）。颜色取设置窗口当前的明暗，与共享页取自身的配色相同。示意里的字与共享页一样留在无障碍树里，笔迹那个字带 `handwriting-preview-stroke`，界面验收靠它确认预览画出来了。
+  FrameworkElement make_handwriting_preview_card() {
+    StackPanel block;
+    block.Spacing(8);
+    block.Padding(Thickness{25, 14, 25, 18});
+    block.Children().Append(make_text(L"预览", 12, palette_.sub));
+
+    StackPanel mock;
+    mock.MaxWidth(560);
+    mock.HorizontalAlignment(HorizontalAlignment::Stretch);
+    mock.Spacing(10);
+    Grid canvas;
+    canvas.MinHeight(230);
+    Shapes::Rectangle frame;
+    frame.RadiusX(12);
+    frame.RadiusY(12);
+    frame.Fill(brush(palette_.card));
+    frame.Stroke(brush(palette_.stroke2));
+    frame.StrokeThickness(1);
+    DoubleCollection dash;
+    dash.Append(4);
+    dash.Append(3);
+    frame.StrokeDashArray(dash);
+    canvas.Children().Append(frame);
+    auto stroke = make_text(L"水", 110, palette_.sub);
+    stroke.FontFamily(Media::FontFamily(L"KaiTi, STKaiti"));
+    stroke.LineHeight(110);
+    stroke.HorizontalAlignment(HorizontalAlignment::Center);
+    stroke.VerticalAlignment(VerticalAlignment::Center);
+    stroke.RenderTransformOrigin(Windows::Foundation::Point{0.5f, 0.5f});
+    RotateTransform tilt;
+    tilt.Angle(-7);
+    stroke.RenderTransform(tilt);
+    A11y::SetAutomationId(stroke, L"handwriting-preview-stroke");
+    canvas.Children().Append(stroke);
+    mock.Children().Append(canvas);
+
+    Grid candidates;
+    candidates.ColumnSpacing(8);
+    int32_t column = 0;
+    for (const auto *candidate : {L"水", L"永", L"木", L"未"}) {
+      ColumnDefinition cell;
+      cell.Width(GridLength{1, GridUnitType::Star});
+      candidates.ColumnDefinitions().Append(cell);
+      Border chip;
+      chip.CornerRadius(CornerRadius{6, 6, 6, 6});
+      chip.BorderBrush(brush(palette_.stroke2));
+      chip.BorderThickness(Thickness{1, 1, 1, 1});
+      chip.Padding(Thickness{8, 8, 8, 8});
+      chip.Child(make_text(candidate, 14, palette_.text));
+      Grid::SetColumn(chip, column++);
+      candidates.Children().Append(chip);
+    }
+    mock.Children().Append(candidates);
+    block.Children().Append(mock);
+
+    auto card = make_inner_card();
+    card.Child(block);
+    A11y::SetName(card, L"手写识别板预览");
+    return card;
+  }
+
 
   // ---- AI 辅助 ----
 
