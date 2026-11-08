@@ -1054,7 +1054,6 @@ fn load_onnx_reranker(directory: &Path) -> Option<msime_onnx_rerank::OnnxScorer>
 pub mod android_data;
 pub mod candidate_colors;
 pub mod candidates;
-pub mod credentials;
 pub mod google;
 #[cfg(not(target_os = "android"))]
 pub mod handwriting;
@@ -1064,11 +1063,8 @@ pub mod input;
 pub mod ios_settings;
 pub mod lifecycle;
 pub mod local_translation;
-pub mod pack_downloads;
-pub mod providers;
 pub mod session;
 pub mod session_store;
-pub mod settled;
 pub mod spacing;
 pub mod translation;
 pub mod user_words;
@@ -1084,15 +1080,11 @@ mod preference_schema_tests;
 pub use android_data::*;
 pub use candidate_colors::*;
 pub use candidates::*;
-pub use credentials::*;
 pub use host::*;
 pub use input::*;
 pub use lifecycle::*;
 pub use local_translation::*;
-pub use pack_downloads::*;
-pub use providers::*;
 pub use session::*;
-pub use settled::*;
 pub use translation::*;
 pub use user_words::*;
 #[cfg(windows)]

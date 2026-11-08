@@ -16,10 +16,6 @@ use msime_client_providers::ai::AiSuggestionRequest;
 use msime_client_services::dictionary::access::DictionaryAccess;
 /// 按用户的设置打一串键看候选，给 `msime-mcp candidates` 用。
 pub mod candidate_preview;
-pub mod clipboard_history;
-pub mod cloud_clipboard;
-pub mod cloud_dictionary;
-pub mod mcp_clients;
 pub mod settings_dictionary;
 pub mod system_fonts;
 use msime_client_core::preferences::{
@@ -72,16 +68,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 /// `msime_client_account` 在 #8201 新增的操作。
-mod account_ops;
 mod bounded_file;
 mod chinese_english_spacing;
 /// 多分类自动云同步的驱动；C 入口在 `ffi::cloud_sync`。与 `cloud_dictionary` 一样和 C 入口模块同名，所以公开，免得遮住 `ffi` 的同名模块。
-pub mod cloud_sync;
 mod dictionary;
 /// 「我的词条」经 WebDAV 网盘同步的宿主入口，见 `msime_client_dictionary_sync`。公开 [`dictionary_webdav::request_json`]，给直接链接这个 crate 的 Tauri 设置应用用，免得它绕一圈 C ABI。
-pub mod dictionary_webdav;
 /// 同一台设备上两个各有一份个人词库的进程之间交换「我的词条」，见 `msime_client_user_words_mirror`。
-mod user_words_mirror;
 // The exports live in `ffi`, but Rust consumers - this crate's own tests and
 // examples, and anything linking the rlib - have always reached them at the
 // crate root. Re-exported so moving the file changes no caller.
@@ -172,12 +164,7 @@ mod doubao_auth;
 #[cfg(not(any(target_os = "android", target_env = "ohos")))]
 mod handwriting_cells;
 pub use doubao_auth::msime_client_doubao_auth_headers;
-mod learned_translation;
-mod niutrans_translation;
 mod pronunciation;
-mod supplementary_glosses;
-mod tencent_translation;
-mod word_breakdown;
 pub use dictionary::{
     dictionary_request_json, dictionary_words, edit_dictionary_word, edit_user_quick_phrase,
     import_dictionary_words, lookup_candidates, msime_client_dictionary,
@@ -194,11 +181,9 @@ mod dictionary_updates;
 mod key_sound;
 // 生命周期核心；`pub` 是为了让集成测试（零分配断言）直接调用纯推导函数。
 pub mod lifecycle;
-mod plugin_tables;
 // 对共享状态目录没有写权限的宿主怎么准备运行时（iOS 键盘没有完全访问，#10945）。
 mod read_only_state;
 // 脚本插件：进程开关、每会话的实例和进程级的模块缓存、熔断。移动端是空壳。
-mod scripts;
 pub use dictionary_snapshot::{
     inspect_snapshot_json, msime_client_snapshot_discard, msime_client_snapshot_inspect,
     msime_client_snapshot_prepare, msime_client_snapshot_queue, msime_client_snapshot_restore,
