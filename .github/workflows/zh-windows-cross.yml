@@ -6,7 +6,7 @@ name: zh windows cross build
 on:
   workflow_dispatch:
   push:
-    branches: [zh-only]
+    branches: [zh-only, voice-wip]
 
 permissions:
   contents: read
