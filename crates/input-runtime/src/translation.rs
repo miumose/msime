@@ -6,7 +6,7 @@ pub struct TranslationRun {
     pub text: String,
 }
 
-pub fn source_gets_no_gloss(_source: usize) -> bool {
+pub fn source_gets_no_gloss<T>(_source: T) -> bool {
     true
 }
 

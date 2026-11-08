@@ -2,6 +2,6 @@
 
 pub const PROJECT_MIRRORS: [&str; 0] = [];
 
-pub fn download_prefixes(prefixes: &[String]) -> Vec<String> {
-    prefixes.to_vec()
+pub fn download_prefixes(prefixes: &[String]) -> Vec<&str> {
+    prefixes.iter().map(String::as_str).collect()
 }

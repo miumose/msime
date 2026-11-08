@@ -352,7 +352,9 @@ pub fn install(
 ) -> Result<PathBuf, LocalModelError> {
     let model = find_model(id)?;
     // 和资源包一样按 `download_prefixes` 换源：先用户的镜像，再本项目的国内镜像，最后原地址。原来只用用户的镜像、填了就不再回 GitHub，没填就直连 GitHub，国内下一个上百 MB 的模型常常要很久。
-    let mirrors = crate::resource_packs::download_prefixes(&[mirror]);
+    let mirror_string = mirror.to_string();
+    let prefix = [mirror_string];
+    let mirrors = crate::resource_packs::download_prefixes(&prefix);
     install_model(
         root,
         model,
