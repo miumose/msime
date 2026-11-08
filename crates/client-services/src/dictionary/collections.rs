@@ -8,7 +8,6 @@
 //!
 //! 集合加入的词在用户词库当前视图里本来就有（用户词、已发布词或其他保留行）时，键盘不改它，并在个人词库队列里留下回执（[`PersonalDictionaryState::already_present`](crate::dictionary::personal::PersonalDictionaryState::already_present)）。这里把回执记进 `preexisting.json`，停用、删除集合或从集合里删词时都不删这些词：它们不由集合所有。之后又有一次「加入」真正写进了词库（原词已被移除），这个词就不再算加入前已存在的词。
 
-use crate::community::resource::{validate_resource, CommunityResource, CommunityResourceKind};
 use crate::dictionary::import::{self, ImportError, ImportFailure, ImportFormat, ImportKind};
 use crate::dictionary::personal::{
     PersonalDictionaryError, PersonalDictionaryStore, PersonalWord, PersonalWordKind,
@@ -226,9 +225,6 @@ pub enum DictionaryCollectionsAction {
         #[serde(default)]
         bytes_base64: Option<String>,
     },
-    InstallCommunity {
-        resource: Box<CommunityResource>,
-    },
     /// 不属于任何集合的词，见 [`DictionaryCollectionsStore::queue_words`]。
     QueueWords {
         entries: Vec<PersonalWord>,
@@ -412,9 +408,6 @@ impl DictionaryCollectionsStore {
                 }),
                 (_, None, None) => Err(DictionaryCollectionsError::Invalid),
             },
-            DictionaryCollectionsAction::InstallCommunity { resource } => {
-                self.install_community(&resource)
-            }
             DictionaryCollectionsAction::QueueWords { entries } => self.queue_words(entries),
             DictionaryCollectionsAction::Flush => self.flush(),
             DictionaryCollectionsAction::ThirdPartyMatches { entries } => {
@@ -613,63 +606,6 @@ impl DictionaryCollectionsStore {
     }
 
     /// 安装或更新一个社区词库。同一个资源再装一次时更新已有的集合：去掉新版本里没有的词，加上新增的词。
-    pub fn install_community(
-        &self,
-        resource: &CommunityResource,
-    ) -> Result<DictionaryCollectionsView> {
-        if resource.kind != CommunityResourceKind::Dictionary
-            || validate_resource(resource).is_err()
-        {
-            return Err(DictionaryCollectionsError::Invalid);
-        }
-        let mut kind = None;
-        let mut words = Vec::with_capacity(resource.content.entries.len());
-        for entry in &resource.content.entries {
-            let entry_kind = personal_kind(entry.kind);
-            // 一个集合只有一种词库；混了几种词库的资源装不进同一个集合。
-            if kind.is_some_and(|kind| kind != entry_kind) {
-                return Err(DictionaryCollectionsError::Invalid);
-            }
-            kind = Some(entry_kind);
-            let word = PersonalWord {
-                kind: entry_kind,
-                key: entry.code.to_ascii_lowercase(),
-                value: entry.word.clone(),
-                weight: entry.weight,
-            };
-            valid_new_word(&word, entry_kind)?;
-            words.push(word);
-        }
-        let kind = kind.ok_or(DictionaryCollectionsError::Invalid)?;
-        let source = CollectionSource::Community {
-            resource_id: resource.id,
-            revision: resource.revision,
-        };
-        self.change(|state| {
-            let existing = state.index.collections.iter().find(|metadata| {
-                matches!(metadata.source, CollectionSource::Community { resource_id, .. } if resource_id == resource.id)
-            });
-            let Some(existing) = existing.cloned() else {
-                state.insert(&resource.name, kind, source, words)?;
-                return Ok(());
-            };
-            if existing.kind != kind {
-                return Err(DictionaryCollectionsError::Invalid);
-            }
-            let incoming: HashSet<String> = words.iter().map(PersonalWord::identity).collect();
-            let stale: HashSet<String> = state
-                .entries(existing.id)
-                .iter()
-                .map(PersonalWord::identity)
-                .filter(|identity| !incoming.contains(identity))
-                .collect();
-            state.remove_identities(existing.id, &stale)?;
-            state.append(existing.id, words)?;
-            state.metadata_mut(existing.id)?.source = source;
-            Ok(())
-        })
-    }
-
     /// 核对一批准备发布到社区的词：哪些出现在从第三方词库导入的集合里（来源 `import{format:"scel"}`，即搜狗细胞词库），返回的视图里 `third_party_matches` 是这些词在 `words` 里的下标。第三方词库的整理成果属于原作者，导入是为了用户自己在本机用；社区是唯一会把这些内容「向公众提供」的出口，所以发布前由界面拿这个结果拦下。按词库种类、去掉音节分隔符和大小写之后的编码、原样的词比较：用户把同一个词换个写法的拼音重新敲一遍也认得出，而自己整理的同字不同音的词不受影响。决定与依据见 `.agents/notes/implemented/feature/2026-10-17-scel-community-publish-guard.md`。
     pub fn third_party_matches(&self, words: &[PersonalWord]) -> Result<DictionaryCollectionsView> {
         if words.len() > MAX_THIRD_PARTY_CANDIDATES {
@@ -1351,7 +1287,11 @@ fn parse_id(id: &str) -> Result<Uuid> {
 }
 
 fn valid_name(name: &str) -> Result<()> {
-    if crate::community::valid_name(name) && name.chars().count() <= MAX_NAME_CHARS {
+    let count = name.chars().count();
+    if (1..=MAX_NAME_CHARS).contains(&count)
+        && !crate::has_disallowed_control_with_allowed(name, &[])
+        && name.trim() == name
+    {
         Ok(())
     } else {
         Err(DictionaryCollectionsError::InvalidName)
@@ -1369,19 +1309,6 @@ fn valid_new_word(word: &PersonalWord, kind: PersonalWordKind) -> Result<()> {
         Err(DictionaryCollectionsError::Invalid)
     }
 }
-
-fn personal_kind(kind: crate::cloud::dictionary::DictionaryKind) -> PersonalWordKind {
-    use crate::cloud::dictionary::DictionaryKind;
-    match kind {
-        DictionaryKind::Pinyin => PersonalWordKind::Pinyin,
-        DictionaryKind::Wubi => PersonalWordKind::Wubi,
-        DictionaryKind::Wubi98 => PersonalWordKind::Wubi98,
-        DictionaryKind::Wubixsj => PersonalWordKind::WubiXsj,
-        DictionaryKind::Quick => PersonalWordKind::QuickPhrase,
-        DictionaryKind::English => PersonalWordKind::English,
-    }
-}
-
 fn import_kind(kind: PersonalWordKind) -> ImportKind {
     match kind {
         PersonalWordKind::Pinyin => ImportKind::Pinyin,

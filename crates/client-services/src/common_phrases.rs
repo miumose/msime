@@ -4,7 +4,6 @@
 //!
 //! 文件是 `<preferences_directory>/CommonPhrases.json`，旁边的 `CommonPhrases.json.lock` 是它的文件锁。宿主进程和 Android 的 `:ime` 进程共用这个目录（和 `CommunityLibrary.json` 一样），所以每次操作都在锁里读、改、原子写回，并返回整份文档。文件损坏时如实报错，绝不悄悄清空。
 
-use crate::community::resource::{validate_resource, CommunityResource, CommunityResourceKind};
 use crate::file_lock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -102,9 +101,6 @@ pub enum CommonPhrasesAction {
     Move {
         id: Uuid,
         index: usize,
-    },
-    InstallPack {
-        resource: Box<CommunityResource>,
     },
     RemovePack {
         id: Uuid,
@@ -216,24 +212,6 @@ fn normalized_note(note: &str) -> &str {
 fn normalize_line_breaks(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
-
-fn normalized_pack_texts(resource: &CommunityResource) -> (Vec<String>, usize) {
-    let mut skipped = 0;
-    let mut normalized = Vec::new();
-    for phrase in &resource.content.phrases {
-        let text = normalize_line_breaks(&phrase.text);
-        if !valid_phrase_text(&text) {
-            skipped += 1;
-            continue;
-        }
-        if normalized.is_empty() {
-            normalized.reserve(resource.content.phrases.len());
-        }
-        normalized.push(text);
-    }
-    (normalized, skipped)
-}
-
 #[derive(Clone, Debug)]
 pub struct CommonPhrasesStore {
     file: PathBuf,
@@ -266,7 +244,6 @@ impl CommonPhrasesStore {
                 .replace_with_note(id, &text, note.as_deref())
                 .map(Self::outcome),
             CommonPhrasesAction::Move { id, index } => self.move_to(id, index).map(Self::outcome),
-            CommonPhrasesAction::InstallPack { resource } => self.install_pack(&resource),
             CommonPhrasesAction::RemovePack { id } => self.remove_pack(id).map(Self::outcome),
             CommonPhrasesAction::AddCategory { name } => {
                 self.add_category(&name).map(Self::outcome)
@@ -410,73 +387,6 @@ impl CommonPhrasesStore {
     }
 
     /// 安装或更新一个社区短语包。同一个包再装一次时，用新内容替换它原有的全部条目，位置保持在原来第一条所在处；新包追加在末尾。超过本地 1000 个 UTF-16 单元的条目和包内重复的文本不收，计入 `skipped`；一条都收不下时拒绝。
-    pub fn install_pack(
-        &self,
-        resource: &CommunityResource,
-    ) -> Result<CommonPhrasesOutcome, CommonPhrasesError> {
-        if resource.kind != CommunityResourceKind::Phrase || validate_resource(resource).is_err() {
-            return Err(CommonPhrasesError::Invalid);
-        }
-        let (normalized, mut skipped) = normalized_pack_texts(resource);
-        // Borrow normalized text while finding first occurrences, then move only the accepted
-        // strings into the pack after releasing the set.
-        let mut seen = HashSet::with_capacity(normalized.len());
-        let unique = normalized
-            .iter()
-            .map(|text| seen.insert(text.as_str()))
-            .collect::<Vec<_>>();
-        drop(seen);
-        let mut texts = Vec::with_capacity(normalized.len().min(MAX_PACK_PHRASES));
-        for (text, unique) in normalized.into_iter().zip(unique) {
-            if !unique || texts.len() >= MAX_PACK_PHRASES {
-                skipped += 1;
-            } else {
-                texts.push(text);
-            }
-        }
-        if texts.is_empty() {
-            return Err(CommonPhrasesError::Invalid);
-        }
-        let pack = CommonPhrasePack {
-            id: resource.id,
-            name: resource.name.clone(),
-            revision: resource.revision,
-        };
-        let document = self.update(|document| {
-            let existing = document.packs.iter().position(|item| item.id == pack.id);
-            let insert_at = match existing {
-                Some(index) => {
-                    document.packs[index] = pack.clone();
-                    let first = document
-                        .phrases
-                        .iter()
-                        .position(|phrase| phrase.pack == Some(pack.id));
-                    document
-                        .phrases
-                        .retain(|phrase| phrase.pack != Some(pack.id));
-                    first.unwrap_or(document.phrases.len())
-                }
-                None => {
-                    if document.packs.len() >= MAX_PACKS {
-                        return Err(CommonPhrasesError::Limit);
-                    }
-                    document.packs.push(pack.clone());
-                    document.phrases.len()
-                }
-            };
-            let entries = texts.iter().map(|text| CommonPhrase {
-                id: Uuid::new_v4(),
-                text: text.clone(),
-                note: String::new(),
-                category: None,
-                pack: Some(pack.id),
-            });
-            document.phrases.splice(insert_at..insert_at, entries);
-            Ok(())
-        })?;
-        Ok(CommonPhrasesOutcome { document, skipped })
-    }
-
     /// 卸载一个短语包，连同来自它的所有条目。
     pub fn remove_pack(&self, id: Uuid) -> Result<CommonPhrases, CommonPhrasesError> {
         self.update(|document| {
@@ -574,7 +484,7 @@ fn validate(document: &CommonPhrases) -> Result<(), ()> {
     for pack in &document.packs {
         if pack.id.is_nil()
             || pack.revision == 0
-            || !crate::community::valid_name(&pack.name)
+            || !valid_name(&pack.name)
             || !pack_ids.insert(pack.id)
         {
             return Err(());
@@ -611,3 +521,9 @@ fn validate(document: &CommonPhrases) -> Result<(), ()> {
 
 #[cfg(test)]
 mod tests;
+
+/// 包名：1–32 个字符，首尾无空白，不含控制字符。
+fn valid_name(value: &str) -> bool {
+    let count = value.chars().count();
+    (1..=32).contains(&count) && !crate::has_disallowed_control_with_allowed(value, &[]) && value.trim() == value
+}

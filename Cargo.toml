@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/path-trust", "crates/client-base", "crates/client-core", "crates/client-providers", "crates/client-services", "crates/engine", "crates/input-runtime", "crates/onnx-rerank", "crates/local-translation", "crates/host-api", "crates/host-windows", "crates/dict-builder", "crates/pack-tool", "crates/script-runtime", "crates/script-sdk"]
+members = ["crates/path-trust", "crates/client-base", "crates/client-core", "crates/client-providers", "crates/client-services", "crates/engine", "crates/input-runtime", "crates/onnx-rerank", "crates/local-translation", "crates/host-api", "crates/host-windows", "crates/dict-builder", "crates/script-runtime", "crates/script-sdk"]
 # Everything except the Windows host DLL: a bare `cargo test` should cover the
 # libraries. The host DLL is built by the platform build scripts.
 default-members = [

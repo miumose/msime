@@ -1897,20 +1897,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "msime-pack-tool"
-version = "0.1.0"
-dependencies = [
- "msime-client-base",
- "msime-client-services",
- "msime-script-runtime",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "zip",
-]
-
-[[package]]
 name = "msime-path-trust"
 version = "0.1.0"
 dependencies = [
