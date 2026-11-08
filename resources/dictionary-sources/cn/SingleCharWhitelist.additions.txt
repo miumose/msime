@@ -1,2 +1,0 @@
-# Characters added to the pinned cn/SingleCharWhitelist.txt (only read by a build that includes unlicensed inputs; a licensed build applies no whitelist). The source data has these readings and the upstream whitelist omitted them.
-昍
