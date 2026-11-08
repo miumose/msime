@@ -1,10 +1,7 @@
-# 本次构建所属产品线的版本号，写进 TSF DLL 的版本资源：安装包构建脚本（Build-Client.ps1、Build-Windows7Client.ps1）显式传 MSIME_WINDOWS_VERSION；没传时现代 Windows 读 version.txt，Win7（MSIME_WINDOWS7_CLIENT）读 version-win7.txt。来源与 Server 上报的版本相同（CMakeLists.txt 里 msime-client-server 的 MSIME_WINDOWS_VERSION），文件属性里看到的版本因此与关于页、更新检查一致。
+# 本次构建所属产品线的版本号，写进 TSF DLL 的版本资源：安装包构建脚本（Build-Client.ps1）显式传 MSIME_WINDOWS_VERSION；没传时读 version.txt。来源与 Server 上报的版本相同（CMakeLists.txt 里 msime-client-server 的 MSIME_WINDOWS_VERSION），文件属性里看到的版本因此与关于页、更新检查一致。
 # 生成的 msime_tsf_version.h 放在 MSIME_TSF_VERSION_INCLUDE_DIR，TSF 和只编资源的导出测试工程都把它加进头文件路径。
 include_guard(DIRECTORY)
 set(msime_product_version_file "${CMAKE_CURRENT_LIST_DIR}/version.txt")
-if(MSIME_WINDOWS7_CLIENT)
-  set(msime_product_version_file "${CMAKE_CURRENT_LIST_DIR}/version-win7.txt")
-endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${msime_product_version_file}")
 if(MSIME_WINDOWS_VERSION)
   set(msime_product_version "${MSIME_WINDOWS_VERSION}")

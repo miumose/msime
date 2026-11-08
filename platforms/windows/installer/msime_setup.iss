@@ -24,19 +24,8 @@
 #endif
 #define MyAppPublisher "Metasequoia"
 #define MyAppExeName   "MetasequoiaImeServer.exe"
-#ifdef Windows7Architecture
-#if (Windows7Architecture != "x64") && (Windows7Architecture != "x86")
-#error Windows7Architecture must be x64 or x86
-#endif
-#define MySettingsExeName "msime-client-settings-win7.exe"
-#define MyWindowsSuffix "_win7_" + Windows7Architecture
-#if Windows7Architecture == "x86"
-#define Windows7X86
-#endif
-#else
 #define MySettingsExeName "msime-client-settings.exe"
 #define MyWindowsSuffix ""
-#endif
 #define MyWatchdogName "MetasequoiaImeWatchdog.exe"
 #define MyWatchdogTaskName MyEditionWatchdogTask
 ; Global::MetasequoiaIMECLSID in platforms/windows/tsf/Global/Globals.cpp.
@@ -85,26 +74,8 @@ PrivilegesRequired=admin
 UsedUserAreasWarning=no
 ; TSF 的宿主应用会持有只读词库；发生资源更新时，也要让 Restart Manager 检查这些文件。
 CloseApplicationsFilter=*.exe,*.dll,*.chm,*.db,*.bin,*.dat
-#ifdef Windows7Architecture
-MinVersion=6.1sp1
-; x86os、x64os 是 Inno 6.3 起的写法，Win7 包用的 6.2.2 只认含义相同的 x86、x64。
-#if Ver >= EncodeVer(6, 3, 0)
-#define Win7ArchX86 "x86os"
-#define Win7ArchX64 "x64os"
-#else
-#define Win7ArchX86 "x86"
-#define Win7ArchX64 "x64"
-#endif
-#ifdef Windows7X86
-ArchitecturesAllowed={#Win7ArchX86}
-#else
-ArchitecturesAllowed={#Win7ArchX64}
-ArchitecturesInstallIn64BitMode={#Win7ArchX64}
-#endif
-#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-#endif
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={autopf}\{#MyEditionInstallDir}\MetasequoiaIME.ico
 VersionInfoVersion={#MyAppVersion}
@@ -115,9 +86,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Dirs]
 Name: "{commonpf32}\{#MyEditionInstallDir}\{code:GetVersionDir}"
-#ifndef Windows7X86
 Name: "{#MySystemTipDir}\{code:GetVersionDir}"
-#endif
 Name: "{autopf}\{#MyEditionInstallDir}\server"
 ; Server 与设置窗口是中完整性的用户进程，要写这里的配置、用户词库和 runtime-options.json；安装器以高完整性建的目录它们改不动，数据目录放到其他盘时继承来的 ACL 也未必允许普通用户写。ssPostInstall 里的 EnsureImeUserDataDir 再对已有目录补一遍。
 Name: "{code:GetDataDir}"; Permissions: users-modify
@@ -147,27 +116,22 @@ Source: "{#MySourceRoot}\tsf_dll\32\*.dll"; \
     DestDir: "{commonpf32}\{#MyEditionInstallDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion 32bit
 
-#ifndef Windows7X86
 Source: "{#MySourceRoot}\tsf_dll\64\*.dll"; \
     Excludes: "MetasequoiaImeTsf.dll"; \
     DestDir: "{#MySystemTipDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion uninsrestartdelete
 
-#endif
 
 Source: "{#MySourceRoot}\tsf_dll\32\MetasequoiaImeTsf.dll"; \
     DestDir: "{commonpf32}\{#MyEditionInstallDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion regserver 32bit
 
-#ifndef Windows7X86
 Source: "{#MySourceRoot}\tsf_dll\64\MetasequoiaImeTsf.dll"; \
     DestDir: "{#MySystemTipDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion regserver uninsrestartdelete; Check: not IsArm64
 
-#endif
 
 ; Windows on Arm 上 64 位 TIP 换成 Arm64X 的那一份：原生 ARM64 进程（资源管理器、Edge、记事本等）和模拟运行的 x64 进程共用同一个 InprocServer32 路径，x64 TIP 只能被后者加载。它原生的那一半导入同目录的 ARM64 宿主 DLL，ARM64EC 那一半导入上面装进同一目录的 x64 宿主 DLL。Server 和其余程序仍是 x64，在模拟下运行。
-#ifndef Windows7Architecture
 Source: "{#MySourceRoot}\tsf_dll\arm64\*.dll"; \
     Excludes: "MetasequoiaImeTsf.dll"; \
     DestDir: "{#MySystemTipDir}\{code:GetVersionDir}"; \
@@ -177,16 +141,13 @@ Source: "{#MySourceRoot}\tsf_dll\arm64\MetasequoiaImeTsf.dll"; \
     DestDir: "{#MySystemTipDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion regserver uninsrestartdelete; Check: IsArm64
 
-#endif
 
 ; Server、设置窗口和 MCP 服务需要与 64 位 TIP 相同的 x64 宿主 DLL 和运行时 DLL。Prepare-PackageFiles.ps1 只把它们暂存在 tsf_dll\64 下，而 Inno 对同一个源文件无论有几条安装条目都只存一份，所以包里只有一份。
-#ifndef Windows7X86
 Source: "{#MySourceRoot}\tsf_dll\64\*.dll"; \
     Excludes: "MetasequoiaImeTsf.dll"; \
     DestDir: "{autopf}\{#MyEditionInstallDir}\server"; \
     Flags: ignoreversion
 
-#endif
 
 ; server_exe 含本地语音识别运行时（sherpa-onnx-c-api.dll、onnxruntime.dll、onnxruntime_providers_shared.dll）。Server 从自身目录 LoadLibrary 加载它们，因此必须与 MetasequoiaImeServer.exe 同目录；ignoreversion 保证升级时换成本包锁定的版本。PDB 和链接器的 .ilk 不装，见上面 TSF 一节。
 Source: "{#MySourceRoot}\server_exe\*"; \
@@ -244,9 +205,7 @@ Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 [Registry]
 ; WER helper 由系统服务按完整路径加载；只登记本安装包自己的架构副本，卸载时删除该值。
 Root: HKLM32; Subkey: "Software\Microsoft\Windows\Windows Error Reporting\RuntimeExceptionHelperModules"; ValueType: dword; ValueName: "{commonpf32}\{#MyEditionInstallDir}\{code:GetVersionDir}\MetasequoiaImeCrashWer.dll"; ValueData: "0"; Flags: uninsdeletevalue
-#ifndef Windows7X86
 Root: HKLM; Subkey: "Software\Microsoft\Windows\Windows Error Reporting\RuntimeExceptionHelperModules"; ValueType: dword; ValueName: "{#MySystemTipDir}\{code:GetVersionDir}\MetasequoiaImeCrashWer.dll"; ValueData: "0"; Flags: uninsdeletevalue
-#endif
 Root: HKLM; Subkey: "{#MyEditionRegistryKey}"; \
     ValueType: string; ValueName: "VersionDir"; ValueData: "{code:GetVersionDir}"; \
     Flags: uninsdeletevalue
@@ -350,11 +309,6 @@ var
   Prompt: String;
 begin
   Result := True;
-#ifdef Windows7Architecture
-  { Win7 产品由原生窗口与已核验的随应用运行库组成，无需 WebView2 或系统 VC 安装。 }
-  exit;
-#endif
-
   { 这个产品不带 WebView 界面：设置和面板都是原生的，安装只要求 VC 运行库。}
   NeedsVCRuntime := not VCRuntimeIsInstalled;
   if NeedsVCRuntime then

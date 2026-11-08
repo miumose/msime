@@ -251,9 +251,8 @@ void run_worker(const std::shared_ptr<UpdateNotifier::State> &state) {
       continue;
     }
     next = now + update_check_interval;
-    const auto body = update_background_request(state->options.directory, state->options.windows7,
-                                                state->options.version, state->options.edition, channel,
-                                                state->options.architecture)
+    const auto body = update_background_request(state->options.directory, state->options.version,
+                                                state->options.edition, channel)
                           .dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     std::string response;
     if (auto owned = host_api::own_string(msime_client_update_background_check(

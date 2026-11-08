@@ -29,17 +29,7 @@ inline bool update_notice_may_show(bool accepts_notifications, std::chrono::minu
 }
 
 // 本程序编译成的处理器架构，写法同 Rust 的 `std::env::consts::ARCH`（与 settings/AboutPageModel.h 的 build_architecture 相同，那份是宽字符，Server 不引用设置窗口的头文件）。认不出时为空。
-constexpr std::string_view update_build_architecture() {
-#if defined(_M_ARM64) || defined(__aarch64__)
-  return "aarch64";
-#elif defined(_M_X64) || defined(__x86_64__)
-  return "x86_64";
-#elif defined(_M_IX86) || defined(__i386__)
-  return "x86";
-#else
-  return {};
-#endif
-}
+
 
 // 偏好里的 `update_channel`，按 UpdateChannelText.h 的规则归一成 stable、beta、nightly。
 inline std::string update_channel_preference(const nlohmann::json &preferences) {
@@ -52,21 +42,16 @@ inline std::string update_channel_preference(const nlohmann::json &preferences) 
   return std::string(update_channel::normalize(stored));
 }
 
-// `msime_client_update_background_check` 的请求：`directory` 是本用户的更新记录目录（UTF-8，common/UpdateRecordDirectory.h，与设置窗口读 `msime_client_update_pending` 用的是同一个目录）。普通构建照设置窗口不带架构（同一个安装程序同时支持 x64 和 Arm64），带上偏好里的通道。Windows 7 构建的平台是 `windows7`，只有正式发布，不带通道；它的安装包分 x64 和 x86 两个，共享层没有架构时找不到任何发布，所以照 Win7 专用设置带上本程序编译成的架构 `architecture`（`update_build_architecture()`，为空时不带）。
-inline nlohmann::json update_background_request(const std::string &directory, bool windows7,
+// `msime_client_update_background_check` 的请求：`directory` 是本用户的更新记录目录（UTF-8，common/UpdateRecordDirectory.h，与设置窗口读 `msime_client_update_pending` 用的是同一个目录）。安装包同时支持 x64 和 Arm64，所以不带架构；带上偏好里的通道。
+inline nlohmann::json update_background_request(const std::string &directory,
                                                 const std::string &version,
                                                 const std::string &edition,
-                                                const std::string &channel,
-                                                std::string_view architecture) {
-  nlohmann::json request{{"directory", directory},
-                         {"platform", windows7 ? "windows7" : "windows"},
-                         {"current_version", version},
-                         {"edition", edition}};
-  if (!windows7)
-    request["channel"] = std::string(update_channel::normalize(std::string_view(channel)));
-  else if (!architecture.empty())
-    request["arch"] = std::string(architecture);
-  return request;
+                                                const std::string &channel) {
+  return nlohmann::json{{"directory", directory},
+                        {"platform", "windows"},
+                        {"current_version", version},
+                        {"edition", edition},
+                        {"channel", std::string(update_channel::normalize(std::string_view(channel)))}};
 }
 
 // 一个要提醒的构建，取自回答里的 `notify`。
@@ -169,7 +154,7 @@ inline UpdateBackgroundResult parse_update_background_response(std::string_view 
   return result;
 }
 
-// 托盘气泡的标题、正文和图标的提示。标题是「<产品名>有新版本 vX」，产品名按版本取（Server 传 MSIME_EDITION_DISPLAY_NAME，如「水杉输入法」「水杉五笔」），几个版本同时安装时分得清是哪个；正文写明是哪个通道的哪个构建，再说点这里打开设置的「关于」页。Windows 10/11 把它显示成通知，Windows 7 显示成气泡；标题最多 63 个字符、正文最多 255 个，版本号再长也装得下。气泡收起后图标还留着，提示在标题下面再说一句点它查看、右键移除。
+// 托盘气泡的标题、正文和图标的提示。标题是「<产品名>有新版本 vX」，产品名按版本取（Server 传 MSIME_EDITION_DISPLAY_NAME，如「水杉输入法」「水杉五笔」），几个版本同时安装时分得清是哪个；正文写明是哪个通道的哪个构建，再说点这里打开设置的「关于」页。Windows 10/11 把它显示成通知；标题最多 63 个字符、正文最多 255 个，版本号再长也装得下。气泡收起后图标还留着，提示在标题下面再说一句点它查看、右键移除。
 struct UpdateNotificationText {
   std::wstring title;
   std::wstring body;

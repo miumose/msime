@@ -54,3 +54,50 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           rustup toolchain install
           bash platforms/windows/build-cross.sh x64 pinyin
+
+  settings:
+    name: Windows WinUI settings (MSVC)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Use a short Cargo cache path
+        shell: pwsh
+        run: ./platforms/windows/Use-ShortCargoHome.ps1
+
+      - name: Locate vcpkg
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            if (-not (Test-Path -LiteralPath 'C:\vcpkg\scripts\buildsystems\vcpkg.cmake' -PathType Leaf)) { throw 'vcpkg not found' }
+            "VCPKG_INSTALLATION_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+          }
+
+      - name: Build the settings host library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+          cargo build --locked -p msime-host-api -j 2
+          if ($LASTEXITCODE -ne 0) { throw 'Settings host library build failed' }
+
+      - name: Build the WinUI settings window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = @(& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\amd64\MSBuild.exe')
+          if ($msbuild.Count -lt 1) { throw 'MSBuild not found' }
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { 'C:\vcpkg' }
+          $nativeDeps = Join-Path $env:GITHUB_WORKSPACE 'target/windows-native-deps/settings'
+          & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'nlohmann-json:x64-windows-static-md' "--x-install-root=$nativeDeps" --disable-metrics
+          if ($LASTEXITCODE -ne 0) { throw 'nlohmann-json install failed' }
+          $nativeInclude = Join-Path $nativeDeps 'x64-windows-static-md/include'
+          $output = "$env:GITHUB_WORKSPACE/target/windows-pinyin/x64/settings/"
+          & $msbuild[0] platforms/windows/settings/MSIME.Settings.vcxproj /restore /t:Build /p:Configuration=RelWithDebInfo /p:Platform=x64 /p:TargetName=msime-client-settings /p:HostApiLibrary="$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib" /p:NativeDependenciesInclude="$nativeInclude" /p:MsimeEdition=pinyin /p:OutDir="$output" /p:IntDir="$env:GITHUB_WORKSPACE/target/windows-pinyin/x64/settings-obj/" /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Settings host build failed' }
+          if (-not (Test-Path -LiteralPath (Join-Path $output 'msime-client-settings.exe') -PathType Leaf)) { throw 'msime-client-settings.exe was not produced' }

@@ -138,8 +138,8 @@ private:
   DPI_AWARENESS_CONTEXT previous_;
 };
 
-// 只供独立宿主在创建窗口前调用。现代 Windows 继续依赖窗口自己的线程上下文；Win7 进程一次性启用系统 DPI，不能在临时线程作用域中切换它。
-inline void initialize_windows7_process_dpi() {
+// 只供独立宿主在创建窗口前调用：系统没有线程级 DPI 接口时一次性启用进程级 DPI。
+inline void initialize_process_dpi() {
   const auto &api = dpi_api();
   if (!api.set_thread && !IsProcessDPIAware())
     api.process_context(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);

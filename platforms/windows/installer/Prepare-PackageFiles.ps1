@@ -29,8 +29,7 @@ param(
     [string]$VoiceRuntimeDirectory = 'target/voice-runtime/windows-x64',
     # 产品版本（shared/contracts/editions.json 里有 Windows 段的 id）。决定从哪个构建目录取文件（full 是 target/windows-full，其他版本是 target/windows-<id>）、host DLL 的名字、按哪份资源锁校验词库、带哪些语言词库，以及 Server 目录里版本声明写哪个版本。缺省是 full。
     [ValidatePattern('^[a-z][a-z0-9]*$')][string]$Edition = 'full',
-    [ValidateSet('', 'x64', 'x86')][string]$Windows7Architecture = '',
-    # 独立暂存目录让 Win7 包与现代包可同时保留，不修改另一份已准备的安装文件。
+    # 独立暂存目录，不修改仓库里已准备的那一份。
     [string]$PackageDirectory = '',
     [switch]$Light
 )
@@ -43,17 +42,9 @@ if ($TargetVersion -notmatch '^[0-9][0-9A-Za-z.+-]*$') {
 }
 
 if ($PackageDirectory -eq '') {
-    $PackageDirectory = if ($Windows7Architecture -ne '') { Join-Path $RepoRoot "target/windows7-package/$Edition/$Windows7Architecture" } else { $PSScriptRoot }
+    $PackageDirectory = $PSScriptRoot
 }
 if (-not [IO.Path]::IsPathRooted($PackageDirectory)) { throw 'PackageDirectory 必须是绝对目录' }
-if ($Windows7Architecture -ne '') {
-    $win7Build = "target/windows7-$Edition"
-    $ServerReleaseDirectory = "$win7Build/$Windows7Architecture/runtime"
-    $DesktopExecutable = "$ServerReleaseDirectory/msime-client-settings-win7.exe"
-    $DesktopPreviewExecutable = "$ServerReleaseDirectory/msime-client-panels-win7.exe"
-    $Tsf32ReleaseDirectory = "$win7Build/x86/runtime"
-    $Tsf64ReleaseDirectory = "$win7Build/x64/runtime"
-}
 
 $editionTable = Get-Content -LiteralPath (Join-Path $RepoRoot 'shared/contracts/editions.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $editionEntry = @($editionTable.editions | Where-Object { $_.id -ceq $Edition -and $null -ne $_.platforms.windows })
@@ -62,9 +53,9 @@ if ($editionEntry.Count -ne 1) {
 }
 $hostDllName = [string]$editionEntry[0].platforms.windows.host_dll
 $defaultScheme = [string]$editionEntry[0].default_scheme
-# 现代 Windows 包把可选的日文和五笔资源放到共享资源包目录；日文版与五笔版的默认方案必须随包可用，Win7 宿主没有这套资源包入口，继续带完整词库。
+# 现代 Windows 包把可选的日文和五笔资源放到共享资源包目录；日文版与五笔版的默认方案必须随包可用。
 $omitOnDemandNames = @()
-if ($Windows7Architecture -eq '') {
+if ($true) {
     if ($defaultScheme -ne 'japanese') {
         $omitOnDemandNames += @('msime-japanese.dat', 'msime-mozc_dictionary_oss_README.txt', 'msime-mozc_LICENSE.txt')
     }
@@ -80,12 +71,12 @@ $resourceLock = if ($Edition -eq 'full') {
 }
 $languageDictionaryNames = @($editionEntry[0].language_dictionaries)
 # 现代 Windows 包把语言词库也放到共享资源包目录；设备验收和需要完整内置词库的构建通过 MSIME_REQUIRE_LANGUAGE_DICTIONARIES=1 明确保留它们。Win7 宿主没有资源包入口，继续带齐。
-$omitLanguageDictionaries = $Windows7Architecture -eq '' -and $env:MSIME_REQUIRE_LANGUAGE_DICTIONARIES -ne '1'
+$omitLanguageDictionaries = $true -and $env:MSIME_REQUIRE_LANGUAGE_DICTIONARIES -ne '1'
 # 落定重排模型（settled-model）和手写模型（Zinnia handwriting-zh_CN.model）不进安装包：设置应用按 resources/settled-model.lock.json 和 resources/handwriting-model.lock.json 把它们下载到 DataDir\resource-packs（手写模型连同它的 LGPL-2.1 许可证一起下载）。
 # 非英文离线释义（offline-glosses/zh-<语言>.db）按中文候选查释义，只给提供中文方案的版本（版本表 features.offline_glosses，scripts/test-editions.py 检查它等于版本是否提供中文方案）。日文、越南文和藏文版不装。
 $editionOfflineGlosses = [bool]$editionEntry[0].features.offline_glosses
 $editionBuild = "target/windows-$Edition"
-if ($Windows7Architecture -eq '' -and -not $PSBoundParameters.ContainsKey('DesktopExecutable')) {
+if ($true -and -not $PSBoundParameters.ContainsKey('DesktopExecutable')) {
     $DesktopExecutable = "$editionBuild/x64/bin/msime-client-settings.exe"
 }
 
@@ -93,7 +84,7 @@ function Test-PackageTestArtifact {
     param([Parameter(Mandatory)][string]$BaseName)
     # Client CMake tests use windows-*; the other patterns cover the remaining test executables.
     # Production entry points use MetasequoiaIme* or msime-client-* names.
-    return $BaseName -like '*Tests' -or $BaseName -like 'test_*' -or $BaseName -like 'windows-*' -or $BaseName -like 'windows7-*'
+    return $BaseName -like '*Tests' -or $BaseName -like 'test_*' -or $BaseName -like 'windows-*'
 }
 
 function Assert-PathExists {
@@ -208,11 +199,11 @@ Assert-PathExists -LiteralPath $serverRelease -Description 'Server Release 输�
 Assert-PathExists -LiteralPath (Join-Path $serverRelease 'MetasequoiaImeWatchdog.exe') -Description 'Watchdog Release EXE'
 Assert-PathExists -LiteralPath $tsf32Release -Description '32 位 TSF Release DLL'
 Assert-PathExists -LiteralPath $tsf32WerHelper -Description '32 位 TSF 的 WER helper'
-if ($Windows7Architecture -ne 'x86') {
+if ($true) {
     Assert-PathExists -LiteralPath $tsf64Release -Description '64 位 TSF Release DLL'
     Assert-PathExists -LiteralPath $tsf64WerHelper -Description '64 位 TSF 的 WER helper'
 }
-if ($Windows7Architecture -eq '') {
+if ($true) {
 Assert-PathExists -LiteralPath $tsf32Pdb -Description '32 位 TSF Release PDB'
 Assert-PathExists -LiteralPath $tsf64Pdb -Description '64 位 TSF Release PDB'
 Assert-PathExists -LiteralPath $tsfArm64Release -Description 'Arm64X TSF Release DLL'
@@ -220,7 +211,7 @@ Assert-PathExists -LiteralPath $tsfArm64Pdb -Description 'Arm64X TSF Release PDB
 Assert-PathExists -LiteralPath $tsfArm64Host -Description "Arm64X TSF 的 $arm64HostDllName"
 Assert-PathExists -LiteralPath $tsfArm64WerHelper -Description 'Arm64X TSF 的 WER helper'
 }
-foreach ($hostDll in @($tsf32Host) + @($(if ($Windows7Architecture -ne 'x86') { $tsf64Host }))) {
+foreach ($hostDll in @($tsf32Host) + @($tsf64Host)) {
     if (-not (Test-Path -LiteralPath $hostDll -PathType Leaf)) {
         throw "缺少对应架构 TSF 的 $hostDllName"
     }
@@ -229,7 +220,7 @@ foreach ($hostDll in @($tsf32Host) + @($(if ($Windows7Architecture -ne 'x86') { 
 # 别的版本的宿主 DLL 永远不是本版本 TIP 的依赖。
 $editionHostDllNames = @($editionTable.editions | Where-Object { $null -ne $_.platforms.windows } | ForEach-Object { [string]$_.platforms.windows.host_dll })
 $tsf32Dependencies = @(); $tsf64Dependencies = @()
-if ($Windows7Architecture -eq '') {
+if ($true) {
 $tsf32Dependencies = @(
     Get-ChildItem -LiteralPath (Split-Path -Parent $tsf32Release) -File -Filter '*.dll' |
         Where-Object { $_.Name -notin (@('MetasequoiaImeTsf.dll') + $editionHostDllNames) } |
@@ -246,7 +237,7 @@ $tsf64Dependencies = @(
 )
 }
 # 安装器从 tsf_dll\64 那一份把 x64 宿主 DLL 和这些依赖装进 Server 目录，包里只存一份；Server 输出里同名却内容不同的文件会被它悄悄替换，所以在替换任何旧的暂存内容之前就在这里拒绝。
-foreach ($shared in @($(if ($Windows7Architecture -eq 'x86') { $tsf32Host } else { $tsf64Host })) + $tsf64Dependencies) {
+foreach ($shared in @($tsf64Host) + $tsf64Dependencies) {
     $serverCopy = Join-Path $serverRelease (Split-Path -Leaf $shared)
     if ((Test-Path -LiteralPath $serverCopy -PathType Leaf) -and
         (Get-FileHash -LiteralPath $serverCopy).Hash -ne (Get-FileHash -LiteralPath $shared).Hash) {
@@ -269,7 +260,7 @@ $missingServerPdb = @(
         } |
         ForEach-Object { Join-Path $_.DirectoryName "$($_.BaseName).pdb" }
 )
-if ($Windows7Architecture -eq '' -and $missingServerPdb.Count -gt 0) {
+if ($true -and $missingServerPdb.Count -gt 0) {
     throw "Server Release 缺少同名 PDB：$($missingServerPdb -join ', ')"
 }
 Assert-PathExists -LiteralPath $appIcon -Description '应用图标'
@@ -341,11 +332,6 @@ if ($null -ne $voiceRuntimeFrom) {
     }
 }
 
-# Win7 的原生候选与表情面板静态链接 HarfBuzz，不能沿用新增依赖前的旧声明集合。
-if ($Windows7Architecture -and -not ([IO.File]::ReadAllText($thirdPartyNotices).ToLowerInvariant().Contains('harfbuzz'))) {
-    throw 'Win7 第三方声明缺少 HarfBuzz，请按实际依赖前缀重新运行 Collect-Notices.ps1'
-}
-
 New-Item -ItemType Directory -Path $PackageDirectory -Force | Out-Null
 $targetAppData = Join-Path $PackageDirectory 'app_data'
 $targetServer = Join-Path $PackageDirectory 'server_exe'
@@ -378,8 +364,8 @@ Copy-DirectoryContents -Source (Join-Path $RepoRoot 'resources/sound-packs') -De
 Reset-Directory -LiteralPath $targetServer
 Copy-DirectoryContents -Source $serverRelease -Destination $targetServer
 # 使用与 ShellSurfaces.h 一致的产品入口名，不依赖 Cargo 或 Tauri 的产物名。
-$desktopFileName = if ($Windows7Architecture -ne '') { 'msime-client-settings-win7.exe' } else { 'msime-client-settings.exe' }
-$panelFileName = if ($Windows7Architecture -ne '') { 'msime-client-panels-win7.exe' } else { 'MSIME.exe' }
+$desktopFileName = 'msime-client-settings.exe'
+$panelFileName = 'MSIME.exe'
 Copy-Item -LiteralPath $desktopSource -Destination (Join-Path $targetServer $desktopFileName) -Force
 # An explicit shell override must not inherit a PDB from the native shell that
 # was copied with Server output. Only stage symbols beside the chosen source.
@@ -512,7 +498,7 @@ if (-not $Light) {
         }
     }
 }
-# 粤拼、注音和笔画词库（scripts/fetch_language_dictionaries.py 下载到 target/language-dictionaries，版本由 resources/language-dictionaries.lock.json 固定），和译文一样装在 resources 旁边：host-api 在那里找到 language-dictionaries 并写进运行时配置。现代 Windows 发布包默认不暂存它们，设置应用按需下载；Win7 和显式设置 MSIME_REQUIRE_LANGUAGE_DICTIONARIES=1 的构建照旧随包暂存。缺少词库时对应方案由资源包服务保持可选，越南文和藏文不需要数据。每个词库只随它的授权文本一起分发，授权文本必须跟着数据走。
+# 粤拼、注音和笔画词库（scripts/fetch_language_dictionaries.py 下载到 target/language-dictionaries，版本由 resources/language-dictionaries.lock.json 固定），和译文一样装在 resources 旁边：host-api 在那里找到 language-dictionaries 并写进运行时配置。现代 Windows 发布包默认不暂存它们，设置应用按需下载；显式设置 MSIME_REQUIRE_LANGUAGE_DICTIONARIES=1 的构建照旧随包暂存。缺少词库时对应方案由资源包服务保持可选，越南文和藏文不需要数据。每个词库只随它的授权文本一起分发，授权文本必须跟着数据走。
 $languagesSource = Join-Path $RepoRoot 'target/language-dictionaries'
 $languagesTarget = Join-Path $targetServer 'language-dictionaries'
 if (Test-Path -LiteralPath $languagesTarget) {
@@ -558,11 +544,11 @@ if (-not $Light) {
         }
     }
 }
-# 整句联想「增强」逐键重排的两档 ONNX 模型（chinese-ime-lm 的 rerank-v2：8x448 与 6x256），scripts/fetch_rerank_model.py 按 resources/rerank-model.lock.json 下载核对到 target/rerank-model。装在 Server 目录旁边的 rerank-model 和 rerank-model-small：Server 把自己所在的目录作为模型目录告诉它的会话（src/system/RerankModelRoot.h），x64 宿主 DLL 开着 onnx-rerank（Build-RustOutputs.ps1），加载时先自测大的、打一页超过 10 ms 换小的；没有模型时退回 resources 里随包的 sentence-model.safetensors。只给带键盘神经模型的版本（版本表 features.neural_keyboard）；轻量包不带，Win7 包也不带（Win7 的宿主不链接 ONNX Runtime，见 Build-Windows7Core.ps1）。暂存前按锁核对长度和 SHA-256；设置 MSIME_REQUIRE_RERANK_MODELS=1 时缺了就失败。
+# 整句联想「增强」逐键重排的两档 ONNX 模型（chinese-ime-lm 的 rerank-v2：8x448 与 6x256），scripts/fetch_rerank_model.py 按 resources/rerank-model.lock.json 下载核对到 target/rerank-model。装在 Server 目录旁边的 rerank-model 和 rerank-model-small：Server 把自己所在的目录作为模型目录告诉它的会话（src/system/RerankModelRoot.h），x64 宿主 DLL 开着 onnx-rerank（Build-RustOutputs.ps1），加载时先自测大的、打一页超过 10 ms 换小的；没有模型时退回 resources 里随包的 sentence-model.safetensors。只给带键盘神经模型的版本（版本表 features.neural_keyboard）；轻量包不带。暂存前按锁核对长度和 SHA-256；设置 MSIME_REQUIRE_RERANK_MODELS=1 时缺了就失败。
 $rerankSource = Join-Path $RepoRoot 'target/rerank-model'
 $rerankLock = Get-Content -LiteralPath (Join-Path $RepoRoot 'resources/rerank-model.lock.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $editionNeuralKeyboard = [bool]$editionEntry[0].features.neural_keyboard
-$rerankWanted = -not $Light -and $Windows7Architecture -eq '' -and $editionNeuralKeyboard
+$rerankWanted = -not $Light -and $true -and $editionNeuralKeyboard
 $rerankComplete = $rerankWanted
 if ($rerankWanted) {
     # 先核对再动暂存目录：不符时拒绝，上一次暂存的模型原样留着。
@@ -616,7 +602,7 @@ Get-ChildItem -LiteralPath $targetServer -Recurse -File |
     } |
     Remove-Item -Force
 # CI 里 Server 输出目录同时也是 x64 TIP 的构建目录。TIP 和它的符号暂存在 tsf_dll\64 下，只从版本目录加载；宿主 DLL 和 TIP 的运行时 DLL 也从同一份 tsf_dll\64 进入 Server 目录（msime_setup.iss），所以它们都不重复暂存。Build-Client.ps1 也把宿主 DLL 的 PDB 留在这里；Collect-Symbols.ps1 直接从构建输出取它打进符号包，所以它完全不暂存。
-$sharedRemoval = if ($Windows7Architecture -eq '') { @($hostDllName,'msime_host_api.pdb') + @($tsf64Dependencies | ForEach-Object { Split-Path -Leaf $_ }) } else { @('windows7-runtime-closure.json','windows7-imports.txt','files.txt') }
+$sharedRemoval = @($hostDllName,'msime_host_api.pdb') + @($tsf64Dependencies | ForEach-Object { Split-Path -Leaf $_ })
 foreach ($name in @('MetasequoiaImeTsf.dll', 'MetasequoiaImeTsf.pdb', $werHelperName, 'MetasequoiaImeCrashWer.pdb') + $sharedRemoval) {
     $staged = Join-Path $targetServer $name
     if (Test-Path -LiteralPath $staged -PathType Leaf) { Remove-Item -LiteralPath $staged -Force }
@@ -630,14 +616,6 @@ Reset-Directory -LiteralPath $targetTsf
 $targetTsf32 = Join-Path $targetTsf '32'
 $targetTsf64 = Join-Path $targetTsf '64'
 $targetTsfArm64 = Join-Path $targetTsf 'arm64'
-if ($Windows7Architecture -ne '') {
-    foreach ($target in @(@('x86',$tsf32Release,$targetTsf32),@('x64',$tsf64Release,$targetTsf64))) {
-        if ($Windows7Architecture -eq 'x86' -and $target[0] -eq 'x64') { continue }
-        $sourceDirectory = Split-Path -Parent $target[1]
-        & (Join-Path (Split-Path -Parent $PSScriptRoot) 'Copy-Windows7RuntimeClosure.ps1') -ProgramDirectory $sourceDirectory `
-            -EntryPoints @('MetasequoiaImeTsf.dll','MetasequoiaImeCrashWer.dll') -DependencyDirectories @($sourceDirectory) -Destination $target[2] -Architecture $target[0]
-    }
-} else {
 New-Item -ItemType Directory -Path $targetTsf32, $targetTsf64, $targetTsfArm64 -Force | Out-Null
 Copy-Item -LiteralPath $tsf32Release -Destination $targetTsf32 -Force
 Copy-Item -LiteralPath $tsf32Pdb -Destination $targetTsf32 -Force
@@ -650,7 +628,6 @@ Copy-Item -LiteralPath $tsfArm64Release, $tsfArm64Pdb, $tsfArm64Host, $tsfArm64W
 # Build-Client 把检查过架构的发布依赖收集到 TIP 旁边；只复制上面列出的那些，绝不复制共用 x64 目录里的其余文件。
 foreach ($dependency in $tsf32Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf32 -Force }
 foreach ($dependency in $tsf64Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf64 -Force }
-}
 Copy-Item -LiteralPath $appIcon -Destination (Join-Path $PackageDirectory 'MetasequoiaIME.ico') -Force
 # rime-ice is GPL-3.0 and requires attribution, and its content forms the bulk of msime-pinyin.db, so the
 # notice has to reach the user's disk rather than only exist in the source repository.
@@ -662,7 +639,7 @@ Copy-Item -LiteralPath $thirdPartyNotices -Destination (Join-Path $PackageDirect
 # points at "the LICENSE file" without carrying the GPL text itself.
 Copy-Item -LiteralPath $license -Destination (Join-Path $PackageDirectory 'LICENSE.txt') -Force
 
-if ($Windows7Architecture -eq '') {
+if ($true) {
 $targetIss = Join-Path $PSScriptRoot 'msime_setup.iss'
 Assert-PathExists -LiteralPath $targetIss -Description '安装脚本'
 $issContent = Get-Content -LiteralPath $targetIss -Raw -Encoding UTF8

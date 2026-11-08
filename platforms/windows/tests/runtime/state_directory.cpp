@@ -53,7 +53,7 @@ void registry_view_test() {
     fixture.write(KEY_WOW64_32KEY, L"C:\\wrong view");
   using msime::windows::read_registry_string_64;
   require(read_registry_string_64(HKEY_CURRENT_USER, fixture.path.c_str(), L"DataDir") == expected,
-          "must read the 64-bit registry view, including on Win7 WOW64");
+          "must read the 64-bit registry view, including from a WOW64 process");
   require(read_registry_string_64(HKEY_CURRENT_USER, fixture.path.c_str(), L"Padded") == L"C:\\padded",
           "extra terminators must not reach the path");
   require(read_registry_string_64(HKEY_CURRENT_USER, fixture.path.c_str(), L"Missing").empty(),

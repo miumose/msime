@@ -28,30 +28,15 @@ int main() {
     require(update_channel_preference(nlohmann::json::array({"beta"})) == "stable");
 
     // 请求：普通构建带通道，不带架构（同一个安装程序同时支持 x64 和 Arm64）。
-    const auto modern = update_background_request("C:\\Users\\a\\AppData\\Local\\MSIME\\update", false,
-                                                  "1.4.0", "full", "nightly", "x86_64");
+    const auto modern = update_background_request("C:\\Users\\a\\AppData\\Local\\MSIME\\update",
+                                                  "1.4.0", "full", "nightly");
     require(modern == nlohmann::json{{"directory", "C:\\Users\\a\\AppData\\Local\\MSIME\\update"},
                                      {"platform", "windows"},
                                      {"current_version", "1.4.0"},
                                      {"edition", "full"},
                                      {"channel", "nightly"}});
-    require(update_background_request("C:\\s", false, "1.4.0", "wubi", "unknown", "aarch64").at("channel") ==
-            "stable");
-    // Windows 7 构建：平台是 windows7，不带通道（共享层对它一律按稳定版），但必须带架构，共享层按它在 x64 和 x86 两个安装包里选，没有架构时找不到任何发布（与 Win7 专用设置的手动检查相同）。
-    const auto legacy = update_background_request("C:\\s", true, "1.4.0", "full", "beta", "x86_64");
-    require(legacy == nlohmann::json{{"directory", "C:\\s"},
-                                     {"platform", "windows7"},
-                                     {"current_version", "1.4.0"},
-                                     {"edition", "full"},
-                                     {"arch", "x86_64"}});
-    require(update_background_request("C:\\s", true, "1.4.0", "wubi", "stable", "x86").at("arch") == "x86");
-    // 认不出编译架构时不编一个出来：不带 arch，由共享层拒绝，而不是拿到另一个架构的安装包。
-    require(!update_background_request("C:\\s", true, "1.4.0", "full", "stable", "").contains("arch"));
-    {
-      constexpr auto architecture = update_build_architecture();
-      require(architecture.empty() || architecture == "x86_64" || architecture == "x86" ||
-              architecture == "aarch64");
-    }
+    require(update_background_request("C:\\s", "1.4.0", "wubi", "unknown").at("channel") == "stable");
+
 
     // 回答：没到时间、关掉了、连不上时没有提醒。
     require(parse_update_background_response(response(R"({"status":"not_due","notify":null})")).status ==

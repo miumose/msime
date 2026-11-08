@@ -117,21 +117,13 @@ inline PanelHost panel_host_from_setting(std::wstring_view value) {
   return PanelHost::Native;
 }
 
-// 同仓 Win7 包使用系统原生窗口；普通包继续使用 WinUI 设置，面板按 panel_host 选共享面板或原生面板宿主。产品类型由构建明确选定，面板宿主由调用方读到的开关选定，都不能按目录残留文件猜测。Win7 包只有原生面板，忽略 panel_host。
+// 设置窗口是 WinUI 3 原生程序；本 fork 不带面板宿主，面板请求没有可执行的程序。
 inline std::vector<std::wstring>
 shell_executable_names(const ShellSurfaceRequest &request, PanelHost panel_host) {
-#if defined(MSIME_WINDOWS7_CLIENT) && MSIME_WINDOWS7_CLIENT
   (void)panel_host;
   if (request.panel.empty())
-    return {L"msime-client-settings-win7.exe"};
-  return {L"msime-client-panels-win7.exe"};
-#else
-  if (request.panel.empty())
     return {L"msime-client-settings.exe"};
-  if (panel_host == PanelHost::Native)
-    return {L"msime-client-panels.exe"};
-  return {L"MSIME.exe"};
-#endif
+  return {};
 }
 inline std::optional<std::filesystem::path>
 shell_executable(const std::filesystem::path &directory,

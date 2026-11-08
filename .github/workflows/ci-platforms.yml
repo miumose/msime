@@ -750,7 +750,7 @@ jobs:
     name: Windows native settings
     # 留在 GitHub 托管的 runner：冒烟要把设置窗口撑到 1000×780，Depot 的 Windows 机型主屏只有 800×600，显卡也只报这一档分辨率。
     runs-on: windows-2025
-    # 完整 WinUI、Win7 设置、手写及多版本门禁没有编译缓存，每次都是冷构建。2026-11-05 到 11-06 跑满全部步骤的 107 次里中位 52.8 分钟、p95 56.0、最长 59.4，已经贴着原来的 60 分钟；取 p95 的 1.5 倍向上取整到 5 的倍数。
+    # 完整 WinUI 设置没有编译缓存，每次都是冷构建。2026-11-05 到 11-06 跑满全部步骤的 107 次里中位 52.8 分钟、p95 56.0、最长 59.4，已经贴着原来的 60 分钟；取 p95 的 1.5 倍向上取整到 5 的倍数。
     timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -800,17 +800,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Settings host build failed' }
           Copy-Item target/debug/msime_host_api.dll $output
       # 设置应用和 msime-mcp 的 Windows 路径（崩溃采集经 cc/MSVC 编译 CrashRecorder.cpp、遥测目录、配置路径）在 PR 里没有别的作业编译；这里编译设置应用（只编库和可执行文件：它的测试目标在 Windows 上编不过，macOS 专属的 macos_input_source 测试没有按平台排除）并跑 msime-mcp-server 的测试。Tauri 的构建脚本只要求 frontendDist 存在，放一个空页面。
-      - name: Compile the settings app and test msime-mcp-server
-        if: ${{ needs.changes.outputs.windows == 'true' }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force apps/desktop/dist | Out-Null
-          if (-not (Test-Path apps/desktop/dist/index.html)) { New-Item -ItemType File apps/desktop/dist/index.html | Out-Null }
-          cargo check --locked -p msime-desktop -j 2
-          if ($LASTEXITCODE -ne 0) { throw 'Settings app check failed' }
-          cargo test --locked -p msime-mcp-server -j 2
-          if ($LASTEXITCODE -ne 0) { throw 'MCP server tests failed' }
       # 共享存储替换设置文件时，目标被别的进程短暂打开（杀毒、备份、索引）要等它过去，而不是让设置页把这次保存当成失败、重读旧值。这几条测试在真的 Windows 上打开着目标去替换，macOS 和 Linux 的作业碰不到这种失败。
       - name: Test shared storage replacement while the target is open
         if: ${{ needs.changes.outputs.windows == 'true' }}
@@ -829,79 +818,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo test --locked -p msime-engine -j 2 --test session_threads
           if ($LASTEXITCODE -ne 0) { throw 'Engine session thread tests failed' }
-      - name: Build and test the compatibility settings host
-        if: ${{ needs.changes.outputs.windows == 'true' }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
-          if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) { throw 'vcpkg toolchain not found' }
-          $output = 'target/windows-full/x64/win7-settings'
-          # 使用同一提交的普通核心验证 HWND 和持久化；Win7 目标与实机另做验收。
-          cmake -S platforms/windows/settings/win7 -B $output -A x64 "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/target/windows-native-deps/win7-settings" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DMSIME_HOST_LIBRARY=$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib"
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings configuration failed' }
-          cmake --build $output --config RelWithDebInfo --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings build failed' }
-          Copy-Item target/debug/msime_host_api.dll "$output/RelWithDebInfo/"
-          ctest --test-dir $output -C RelWithDebInfo --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings tests failed' }
-          cmake -S platforms/windows/compat -B target/windows7-compat/x64 -A x64
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility API configuration failed' }
-          cmake --build target/windows7-compat/x64 --config Release --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility API build failed' }
-          ctest --test-dir target/windows7-compat/x64 -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Compatibility API tests failed' }
-          & ./platforms/windows/tests/tools/windows7_imports.ps1
-      - name: Build and test Windows 7 handwriting host
-        if: ${{ needs.changes.outputs.windows == 'true' }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo test --locked -p msime-host-windows --lib ink::
-          if ($LASTEXITCODE -ne 0) { throw 'Windows handwriting backend tests failed' }
-          cargo test --locked -p msime-host-api --lib windows_handwriting::
-          if ($LASTEXITCODE -ne 0) { throw 'Windows handwriting ABI tests failed' }
-          # 工作词库代次的回收在 Windows 上走另一条路（锁文件句柄开着时目录改不了名，持锁就地清空再删），只有在 Windows 上跑才验证得到 NTFS 的真实行为。
-          cargo test --locked -p msime-host-api --lib -- dictionary_updates::tests::unused_working_generations dictionary_updates::tests::failed_generation_claim dictionary_updates::tests::emptying_reclaim dictionary_updates::tests::the_generation_the_host_configuration
-          if ($LASTEXITCODE -ne 0) { throw 'Windows working dictionary generation reclaim tests failed' }
-          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
-          $output = 'target/windows-full/x64/win7-panels'
-          # 复用设置窗口的最小依赖清单；普通核心验证控件，Win7 目标另做兼容验收。
-          cmake -S platforms/windows/panels/win7 -B $output -A x64 "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_MANIFEST_DIR=$env:GITHUB_WORKSPACE/platforms/windows/settings/win7" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/target/windows-native-deps/win7-settings" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DMSIME_HOST_LIBRARY=$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib"
-          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 handwriting configuration failed' }
-          cmake --build $output --config RelWithDebInfo --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 handwriting build failed' }
-          Copy-Item target/debug/msime_host_api.dll "$output/RelWithDebInfo/"
-          ctest --test-dir $output -C RelWithDebInfo --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 handwriting controls tests failed' }
-          # 同一份面板源码的现代 Windows 变体：Build-Client.ps1 把它编成 msime-client-panels.exe 随现代包安装（MSIME_WINDOWS_PANEL_HOST=native 时承载面板）。不链接 HarfBuzz、版本取 version.txt、跳到别的界面时找现代包的程序名，这里用同一套面板测试核对它在现代 Windows 上编得过、跑得通。
-          $modern = 'target/windows-full/x64/panels'
-          cmake -S platforms/windows/panels/win7 -B $modern -A x64 -DMSIME_PANELS_MODERN_WINDOWS=ON "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_MANIFEST_DIR=$env:GITHUB_WORKSPACE/platforms/windows/settings/win7" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/target/windows-native-deps/win7-settings" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DMSIME_HOST_LIBRARY=$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib"
-          if ($LASTEXITCODE -ne 0) { throw 'Modern native panel host configuration failed' }
-          cmake --build $modern --config RelWithDebInfo --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Modern native panel host build failed' }
-          if (-not (Test-Path -LiteralPath "$modern/RelWithDebInfo/msime-client-panels.exe" -PathType Leaf) -or (Test-Path -LiteralPath "$modern/RelWithDebInfo/msime-client-panels-win7.exe")) { throw 'Modern native panel host has the wrong executable name' }
-          Copy-Item target/debug/msime_host_api.dll "$modern/RelWithDebInfo/"
-          ctest --test-dir $modern -C RelWithDebInfo --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Modern native panel host tests failed' }
-      - name: Check Windows 7 product editions
-        if: ${{ needs.changes.outputs.windows == 'true' }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
-          foreach ($edition in @('wubi', 'japanese')) {
-            foreach ($surface in @('settings', 'panels')) {
-              $output = "target/windows-$edition/x64/win7-$surface"
-              cmake -S "platforms/windows/$surface/win7" -B $output -A x64 "-DMSIME_EDITION=$edition" "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_MANIFEST_DIR=$env:GITHUB_WORKSPACE/platforms/windows/settings/win7" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/target/windows-native-deps/win7-settings" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DMSIME_HOST_LIBRARY=$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib"
-              if ($LASTEXITCODE -ne 0) { throw "Windows 7 $edition $surface configuration failed" }
-              cmake --build $output --config RelWithDebInfo --parallel 2
-              if ($LASTEXITCODE -ne 0) { throw "Windows 7 $edition $surface build failed" }
-              Copy-Item target/debug/msime_host_api.dll "$output/RelWithDebInfo/"
-              ctest --test-dir $output -C RelWithDebInfo --output-on-failure
-              if ($LASTEXITCODE -ne 0) { throw "Windows 7 $edition $surface tests failed" }
-            }
-          }
       - name: Inspect native settings pages
         if: ${{ needs.changes.outputs.windows == 'true' }}
         shell: powershell

@@ -6,11 +6,7 @@
 
 #include <nlohmann/json.hpp>
 #include <windows.h>
-#if defined(MSIME_WINDOWS7_CLIENT) && MSIME_WINDOWS7_CLIENT
-#include "../../compat/Windows7WebSocket.h"
-#else
 #include <winhttp.h>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -26,7 +22,6 @@ constexpr std::size_t kMaximumQueuedBytes = 16000 * 2 * 10; // 10 seconds of PCM
 // transcript; neither may exhaust the Server process.
 constexpr std::size_t kMaximumResponseBytes = 1024 * 1024;
 
-#if !defined(MSIME_WINDOWS7_CLIENT) || !MSIME_WINDOWS7_CLIENT
 struct WinHttpHandle
 {
     HINTERNET value = nullptr;
@@ -84,7 +79,6 @@ std::vector<std::uint8_t> AudioFrame(std::int32_t sequence, const std::uint8_t *
     });
 }
 
-#if !defined(MSIME_WINDOWS7_CLIENT) || !MSIME_WINDOWS7_CLIENT
 bool SendBinary(HINTERNET websocket, const std::vector<std::uint8_t> &packet)
 {
     return !packet.empty() && WinHttpWebSocketSend(websocket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE,
@@ -131,7 +125,6 @@ ParsedResponse ParseResponse(const std::vector<std::uint8_t> &message)
     return response;
 }
 
-#if !defined(MSIME_WINDOWS7_CLIENT) || !MSIME_WINDOWS7_CLIENT
 bool ReceiveMessage(HINTERNET websocket, std::vector<std::uint8_t> &message)
 {
     message.clear();
@@ -300,14 +293,6 @@ void DoubaoAsrClient::Cancel()
 
 void DoubaoAsrClient::Run()
 {
-#if defined(MSIME_WINDOWS7_CLIENT) && MSIME_WINDOWS7_CLIENT
-    msime::windows::compat::Windows7WebSocket websocket;
-    const auto auth = msime::voice::doubao_auth_headers(auth_mode_, app_key_, access_key_, resource_id_);
-    const auto send = [&](const std::vector<std::uint8_t>& packet) { return websocket.send(packet); };
-    const auto receive = [&](std::vector<std::uint8_t>& message) { return websocket.receive(message); };
-    const auto close = [&] { websocket.close(); };
-    const bool connected = auth && websocket.connect(endpoint_, *auth);
-#else
     WinHttpHandle session;
     WinHttpHandle connection;
     WinHttpHandle websocket(ConnectWebSocket(endpoint_, auth_mode_, app_key_, access_key_, resource_id_, session, connection));
@@ -315,7 +300,6 @@ void DoubaoAsrClient::Run()
     const auto receive = [&](std::vector<std::uint8_t>& message) { return ReceiveMessage(websocket.value, message); };
     const auto close = [&] { WinHttpWebSocketClose(websocket.value, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0); };
     const bool connected = websocket.value != nullptr;
-#endif
     if (!connected)
     {
         std::lock_guard<std::mutex> lock(result_mutex_);

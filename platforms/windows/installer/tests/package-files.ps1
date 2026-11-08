@@ -647,63 +647,6 @@ try {
     & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -ServerReleaseDirectory $serverOutput
     $declared = Get-Content -LiteralPath (Join-Path $installer 'server_exe/edition.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($declared.edition -ne 'full') { throw 'Full package declaration missing or wrong' }
-    # Win7 的两个包使用自己的原生入口与运行库，不能要求 WinUI、Arm64 或 PDB，也不能覆盖普通暂存。
-    $modernServer = [IO.File]::ReadAllBytes((Join-Path $installer 'server_exe/msime-client-settings.exe'))
-    foreach ($arch in @('x64', 'x86')) {
-        $runtime = "target/windows7-full/$arch/runtime"
-        foreach ($name in @('MetasequoiaImeServer.exe', 'MetasequoiaImeWatchdog.exe', 'msime-client-prepare.exe',
-                'msime-mcp.exe', 'msime-client-settings-win7.exe', 'msime-client-panels-win7.exe', 'MetasequoiaImeTsf.dll',
-                'MetasequoiaImeCrashWer.dll',
-                'msime_host_api.dll', 'synthetic-runtime.dll', 'sherpa-onnx-c-api.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll',
-                'windows7-product.json', 'windows7-imports.txt', 'windows7-runtime-closure.json', 'files.txt', 'windows7-websocket-runtime.exe')) {
-            Write-Fixture "$runtime/$name" "synthetic $arch $name"
-        }
-    }
-    # 闭包工具已有独立 PE 与实机装载测试；这里用窄夹具核对打包器传参和产物归属。
-    Write-Fixture 'Copy-Windows7RuntimeClosure.ps1' @'
-param($ProgramDirectory,$EntryPoints,$DependencyDirectories,$Destination,$Architecture)
-if ($EntryPoints.Count -ne 2 -or $EntryPoints[0] -cne 'MetasequoiaImeTsf.dll' -or $EntryPoints[1] -cne 'MetasequoiaImeCrashWer.dll' -or
-    $DependencyDirectories.Count -ne 1 -or $DependencyDirectories[0] -cne $ProgramDirectory -or
-    -not $ProgramDirectory.EndsWith("$Architecture\runtime")) { throw 'Wrong Win7 TIP closure arguments' }
-New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-foreach($name in @('MetasequoiaImeTsf.dll','MetasequoiaImeCrashWer.dll','msime_host_api.dll','synthetic-runtime.dll')) {
-    Copy-Item -LiteralPath (Join-Path $ProgramDirectory $name) -Destination $Destination
-}
-'@
-    Write-Fixture 'target/windows-notices/THIRD_PARTY_NOTICES.txt' $voiceNotices
-    $rejected = $false
-    try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Windows7Architecture x64 }
-    catch { $rejected = $_.Exception.Message -match 'HarfBuzz' }
-    if (-not $rejected) { throw 'Win7 package accepted notices missing HarfBuzz' }
-    Write-Fixture 'target/windows-notices/THIRD_PARTY_NOTICES.txt' ($voiceNotices + "`nHarfBuzz synthetic license")
-    foreach ($arch in @('x64', 'x86')) {
-        if ($arch -eq 'x86') { Remove-Item -LiteralPath (Join-Path $fixture 'target/windows7-full/x64') -Recurse -Force }
-        & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Windows7Architecture $arch
-        $package = Join-Path $fixture "target/windows7-package/full/$arch"
-        foreach ($name in @('msime-client-settings-win7.exe','msime-client-panels-win7.exe','msime_host_api.dll')) {
-            if ([IO.File]::ReadAllText((Join-Path $package "server_exe/$name")) -cne "synthetic $arch $name") { throw "Win7 wrong architecture or entry: $arch $name" }
-        }
-        foreach ($name in @('msime-client-settings.exe','MSIME.exe','msime-client-panels.exe','MetasequoiaImeTsf.dll','MetasequoiaImeCrashWer.dll','windows7-websocket-runtime.exe','files.txt','windows7-imports.txt','windows7-runtime-closure.json')) {
-            if (Test-Path (Join-Path $package "server_exe/$name")) { throw "Win7 packaged extraneous file: $name" }
-        }
-        foreach ($tip in @('32') + @($(if ($arch -eq 'x64') { '64' }))) {
-            $files = @(Get-ChildItem (Join-Path $package "tsf_dll/$tip") -File | ForEach-Object Name | Sort-Object)
-            if (($files -join ',') -cne 'MetasequoiaImeCrashWer.dll,MetasequoiaImeTsf.dll,msime_host_api.dll,synthetic-runtime.dll') { throw "Win7 TIP includes unrelated dependencies: $tip" }
-            $helperArch = if ($tip -eq '32') { 'x86' } else { 'x64' }
-            $helper = Join-Path $fixture "target/windows7-full/$helperArch/runtime/MetasequoiaImeCrashWer.dll"
-            $before = Get-StagingSnapshot $package
-            Move-Item -LiteralPath $helper -Destination "$helper.moved"
-            try {
-                $rejected = $false
-                try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Windows7Architecture $arch }
-                catch { $rejected = $_.Exception.Message -like '*WER helper*' }
-                if (-not $rejected) { throw "Win7 accepted missing $helperArch WER helper" }
-                if ((Get-StagingSnapshot $package) -cne $before) { throw 'Win7 helper preflight damaged staging' }
-            } finally { Move-Item -LiteralPath "$helper.moved" -Destination $helper }
-        }
-        if ((Test-Path (Join-Path $package 'tsf_dll/arm64')) -or ($arch -eq 'x86' -and (Test-Path (Join-Path $package 'tsf_dll/64')))) { throw 'Win7 includes unsupported TIP architecture' }
-        if ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $installer 'server_exe/msime-client-settings.exe'))) -cne [Convert]::ToBase64String($modernServer)) { throw 'Win7 staging overwrote modern product' }
-    }
     Write-Host 'Full/light package contracts, provenance, exclusions and failure staging and the per-edition packages passed'
 } finally {
     if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force }

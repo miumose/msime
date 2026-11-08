@@ -10,10 +10,8 @@ namespace msime::windows {
 class UpdateNotifier {
 public:
   struct Options {
-    // 共享层的请求里除通道以外的部分：本用户的更新记录目录（UTF-8，common/UpdateRecordDirectory.h）、是不是 Windows 7 构建、本程序编译成的架构（只有 Windows 7 构建放进请求，见 update_background_request）、版本号、版本 id。
+    // 共享层的请求里除通道以外的部分：本用户的更新记录目录（UTF-8，common/UpdateRecordDirectory.h）、版本号、版本 id。
     std::string directory;
-    bool windows7 = false;
-    std::string architecture;
     std::string version;
     std::string edition;
     // 通知标题里的产品名（MSIME_EDITION_DISPLAY_NAME），几个版本同时安装时分得清是哪个。

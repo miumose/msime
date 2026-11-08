@@ -298,10 +298,8 @@ def encode_ver(major: int, minor: int, revision: int, build: int = 0) -> int:
 CI_ISPP_VERSION = encode_ver(6, 7, 1)
 
 
-def preprocess(edition_id: str, light: bool = False, ispp_version: int = CI_ISPP_VERSION, windows7_architecture: str | None = None) -> str:
+def preprocess(edition_id: str, light: bool = False, ispp_version: int = CI_ISPP_VERSION) -> str:
     defines: dict[str, object] = {"Edition": edition_id, "Ver": ispp_version}
-    if windows7_architecture is not None:
-        defines["Windows7Architecture"] = windows7_architecture
     if light:
         defines["LightPackage"] = 1
     # 用真实合成文件展开资源循环与摘要；不依赖本机已暂存哪个产品，也不略过新语法。
@@ -398,23 +396,11 @@ def check_installer(errors: list[str], editions: list[dict], msime_windows: dict
     # 轻量包也要能展开（它走另一组 #ifdef 分支）。
     for entry in editions:
         preprocess(entry["id"], light=True)
-    # 展开两架构的 Win7 分支；现代包继续保持 x64 安装模式与原文件名。
+    # 现代包保持 x64 安装模式和原文件名。
     for entry in editions:
         modern = outputs[entry["id"]]
         if "ArchitecturesAllowed=x64compatible\n" not in modern or "ArchitecturesInstallIn64BitMode=x64compatible\n" not in modern:
             errors.append(f"edition {entry['id']}: modern architecture policy changed")
-        for arch in ("x64", "x86"):
-            for light in (False, True):
-                expanded = preprocess(entry["id"], light=light, windows7_architecture=arch)
-                expected_name = entry["platforms"]["windows"]["installer_base_name"] + "_v0.0.1" + ("_light" if light else "") + "_win7_" + arch
-                expected_arch = f"ArchitecturesAllowed={arch}os\n"
-                server_dir = "ServerDir := ExpandConstant('{autopf}\\" + entry["platforms"]["windows"]["install_dir"] + "\\server');"
-                if expected_arch not in expanded or f"OutputBaseFilename={expected_name}\n" not in expanded or "MinVersion=6.1sp1\n" not in expanded or server_dir not in expanded:
-                    errors.append(f"edition {entry['id']}: Win7 {arch} package identity, minimum OS or server directory changed")
-                if ("ArchitecturesInstallIn64BitMode=x64os\n" in expanded) != (arch == "x64"):
-                    errors.append(f"edition {entry['id']}: Win7 {arch} has incorrect install mode")
-                if ("Source: \".\\tsf_dll\\64\\*.dll\"" in expanded) != (arch == "x64"):
-                    errors.append(f"edition {entry['id']}: Win7 {arch} has incorrect 64-bit TIP payload")
     # 系统目录里的工具要绕开 WOW64 重定向才看得到真正的 System32：Inno 6 在 64 位安装模式下 Exec 本来就绕开，Inno 7 的 32 位 Setup 只有 ExecWithNativeSysDir 绕开。两个版本各展开一次，确认走到了对的那个函数。
     for version, expected in ((CI_ISPP_VERSION, "Exec("), (encode_ver(7, 0, 0), "ExecWithNativeSysDir(")):
         expanded = preprocess(editions[0]["id"], ispp_version=version)

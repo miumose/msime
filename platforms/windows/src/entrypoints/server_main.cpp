@@ -964,7 +964,7 @@ int wmain(int argc, wchar_t **argv) {
   // 任何业务线程创建之前，失败只记一行，不阻止启动。
   const auto process_priority =
       msime::windows::restore_interactive_process_priority();
-  msime::windows::compat::initialize_windows7_process_dpi();
+  msime::windows::compat::initialize_process_dpi();
   // Before any thread exists: libcurl's global init is not thread-safe, and the online workers use it.
   curl_global_init(CURL_GLOBAL_DEFAULT);
   // Crash capture only writes this session's crash record to disk, and only once telemetry::begin armed it with the user's consent; the next start reports it.
@@ -2401,10 +2401,6 @@ int wmain(int argc, wchar_t **argv) {
         UpdateNotifier::Options update_options;
         const auto record_directory_utf8 = record_directory.u8string();
         update_options.directory.assign(record_directory_utf8.begin(), record_directory_utf8.end());
-#if defined(MSIME_WINDOWS7_CLIENT) && MSIME_WINDOWS7_CLIENT
-        update_options.windows7 = true;
-#endif
-        update_options.architecture = std::string(update_build_architecture());
         update_options.version = MSIME_WINDOWS_VERSION;
         update_options.edition = MSIME_EDITION_ID;
         update_options.product_name = MSIME_EDITION_DISPLAY_NAME;
