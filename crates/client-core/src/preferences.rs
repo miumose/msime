@@ -1831,12 +1831,6 @@ pub struct Preferences {
     pub next_word_prediction_buttons: NextWordPredictionButtons,
     #[serde(default)]
     pub custom_translation: CustomTranslationPreferences,
-    /// 嵌入式模型离线翻译；显式开启后独立使用本地目标语言。
-    #[serde(
-        default,
-        skip_serializing_if = "crate::local_translation::LocalTranslationPreferences::is_default"
-    )]
-    pub local_translation: crate::local_translation::LocalTranslationPreferences,
     #[serde(default)]
     pub tencent_tmt: TencentTmtPreferences,
     #[serde(default)]
@@ -4117,7 +4111,7 @@ fn disabled_by_default() -> bool {
 }
 
 fn default_clipboard_history_limit() -> usize {
-    crate::clipboard::DEFAULT_CLIPBOARD_HISTORY_LIMIT
+    50
 }
 
 /// 智能标点在所有平台上默认开：中文模式下打 `0.10.1` 得到的是 `0.10.1`，不是 `0。10。1`。同一个默认也给重复标点转中文、数字后直出和字母后直出；空格转换不跟着开（见 `smart_punctuation_space_convert`）。
@@ -4158,8 +4152,8 @@ impl Preferences {
             return;
         }
         let tencent_unconfigured = self.tencent_tmt.enabled
-            && !(crate::translation::usable_credential(&self.tencent_tmt.secret_id)
-                && crate::translation::usable_credential(&self.tencent_tmt.secret_key));
+            && !(usable_credential(&self.tencent_tmt.secret_id)
+                && usable_credential(&self.tencent_tmt.secret_key));
         let ai = &self.ai_assistant;
         let ai_configured = !ai.provider.trim().is_empty()
             && !ai.endpoint.trim().is_empty()
@@ -4471,7 +4465,6 @@ impl Default for Preferences {
             next_word_prediction: false,
             next_word_prediction_buttons: NextWordPredictionButtons::default(),
             custom_translation: CustomTranslationPreferences::default(),
-            local_translation: crate::local_translation::LocalTranslationPreferences::default(),
             tencent_tmt: TencentTmtPreferences::default(),
             niutrans: NiuTransPreferences::default(),
             voice_input: VoiceInputPreferences::default(),
@@ -5363,7 +5356,7 @@ impl Preferences {
         if !self.cloud_candidate_provider.validate() {
             return Err(PreferencesError::InvalidCloudCandidateProvider);
         }
-        if !crate::clipboard::CLIPBOARD_HISTORY_LIMITS.contains(&self.clipboard_history_limit) {
+        if ![50, 100, 200, 500, 1000].contains(&self.clipboard_history_limit) {
             return Err(PreferencesError::InvalidClipboardHistoryLimit);
         }
         if !self.wubi_candidate_selection.validate() {
@@ -5400,19 +5393,16 @@ impl Preferences {
         if !crate::text::is_bounded_text(&niutrans.app_id, 4096)
             || !crate::text::is_bounded_text(&niutrans.apikey, 4096)
             || (!niutrans.app_id.is_empty()
-                && !crate::translation::usable_credential(&niutrans.app_id))
+                && !usable_credential(&niutrans.app_id))
             || (!niutrans.apikey.is_empty()
-                && !crate::translation::usable_credential(&niutrans.apikey))
+                && !usable_credential(&niutrans.apikey))
         {
             return Err(PreferencesError::InvalidNiuTrans);
-        }
-        if !self.local_translation.validate() {
-            return Err(PreferencesError::InvalidLocalTranslation);
         }
         let translation = &self.custom_translation;
         if !crate::text::is_bounded_text(&translation.api_key, 4096)
             || (!translation.endpoint.is_empty()
-                && !crate::translation::is_supported_endpoint(&translation.endpoint))
+                && !translation.endpoint.starts_with("https://"))
         {
             return Err(PreferencesError::InvalidCustomTranslation);
         }
@@ -6233,17 +6223,8 @@ impl PreferencesStore {
 
     /// Capture under the preferences lock so disabling cannot race a later write.
     /// Lock order is preferences, then clipboard history; never reverse it.
-    pub fn capture_clipboard_text(&self, text: String) -> Result<bool, PreferencesError> {
-        let _lock = self.lock()?;
-        if !self.read_locked()?.preferences.clipboard_history {
-            return Ok(false);
-        }
-        let limit = self.read_locked()?.preferences.clipboard_history_limit;
-        let mut history = crate::clipboard::ClipboardHistoryStore::open_with_limit(
-            self.directory.join("clipboard_history.json"),
-            limit,
-        );
-        Ok(history.push(text)?)
+    pub fn capture_clipboard_text(&self, _text: String) -> Result<bool, PreferencesError> {
+        Ok(false)
     }
 
     /// 仅在偏好仍为关闭时清空；偏好锁始终先于历史锁。
@@ -7298,4 +7279,9 @@ mod quick_symbols_tests {
         let many: Vec<_> = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬".graphemes(true).map(str::to_owned).collect();
         assert_eq!(normalize_touch_quick_symbols(&many).len(), 12);
     }
+}
+
+fn usable_credential(value: &str) -> bool {
+    let trimmed = value.trim_matches([' ', '\t', '\r', '\n']);
+    !trimmed.is_empty() && !(trimmed.starts_with('<') && trimmed.ends_with('>')) && !trimmed.starts_with("FAKESECRET_")
 }
