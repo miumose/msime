@@ -8,3 +8,4 @@ use msime_client_core::{endpoint, preferences, resources, translation};
 
 pub mod proxy;
 pub mod local_models;
+pub mod resource_packs;

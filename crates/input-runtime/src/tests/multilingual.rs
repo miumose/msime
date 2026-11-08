@@ -216,7 +216,7 @@ fn multilingual_rows_do_not_inherit_a_chinese_gloss() {
         .translations
         .insert(WORD.into(), "synthetic gloss".into());
     assert!(runtime.view().candidates[0].translation.is_none());
-    assert!(msime_client_core::translation::source_gets_no_gloss(18));
+    assert!(crate::translation::source_gets_no_gloss(18));
 }
 
 #[test]

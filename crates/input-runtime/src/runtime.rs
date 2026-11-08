@@ -2007,7 +2007,7 @@ impl<E: InputEngine> Runtime<E> {
         // 「仅当前高亮」时候选词翻译只画在高亮行，其他行只画不受范围限制的离线释义。
         let translation = ((!self.translations.is_empty()
             || !self.highlight_translations.is_empty())
-            && !msime_client_core::translation::source_gets_no_gloss(
+            && !crate::translation::source_gets_no_gloss(
                 self.cached
                     .candidate_sources
                     .get(index)
@@ -2024,7 +2024,7 @@ impl<E: InputEngine> Runtime<E> {
         .flatten();
         let translation_runs = translation
             .as_deref()
-            .map(msime_client_core::translation::translation_runs)
+            .map(crate::translation::translation_runs)
             .unwrap_or_default();
         Candidate {
             id: CandidateId {
