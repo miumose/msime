@@ -17,7 +17,7 @@ struct MaintenanceHotkey {
   // 0-based candidate slot; meaningful only for DeleteCandidate.
   uint8_t slot = 0;
 };
-// Decide what a key press means. All four need Ctrl and Shift and Alt together;
+// Decide what a key press means. All three need Ctrl and Shift and Alt together;
 // any other modifier combination belongs to the focused application.
 //
 // `vk` is a Win32 virtual-key code. Both the number row and the numeric keypad

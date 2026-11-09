@@ -38,6 +38,7 @@
 #include "../tsf/IPC/AuxNamedpipeSender.h"
 #include "../../common/HostApiString.h"
 #include "../common/GameCompatProfile.h"
+#include "../common/SurfaceRouteArgument.h"
 #include "AboutPageModel.h"
 #include "AppInputModeRuleList.h"
 #include "CandidateFontPresets.h"
@@ -5191,6 +5192,33 @@ private:
     append_row_frame(group, block).Padding(Thickness{row_inset, 10, row_inset, 10});
   }
 
+  // 不能再撤回的操作前先问一句。
+  Windows::Foundation::IAsyncOperation<bool> confirm(std::wstring title, std::wstring message, std::wstring action) {
+    ContentDialog dialog;
+    dialog.Title(box_value(hstring(title)));
+    dialog.Content(box_value(hstring(message)));
+    dialog.PrimaryButtonText(hstring(action));
+    dialog.CloseButtonText(L"取消");
+    dialog.DefaultButton(ContentDialogButton::Close);
+    dialog.XamlRoot(root_.XamlRoot());
+    dialog.RequestedTheme(palette_.dark ? ElementTheme::Dark : ElementTheme::Light);
+    co_return co_await show_dialog(dialog);
+  }
+
+  // 用户点了对话框的主按钮时返回 true。WinUI 同一时间只显示一个 ContentDialog，再开第二个会抛异常，在 fire_and_forget 协程里会直接结束进程；已经有一个对话框时再点，比如连按两次删除，按取消处理。
+  Windows::Foundation::IAsyncOperation<bool> show_dialog(ContentDialog dialog) {
+    if (dialog_open_)
+      co_return false;
+    dialog_open_ = true;
+    bool accepted = false;
+    try {
+      accepted = co_await dialog.ShowAsync() == ContentDialogResult::Primary;
+    } catch (...) {
+    }
+    dialog_open_ = false;
+    co_return accepted;
+  }
+
   // 共享页的重置（resetFuzzyPinyin）：先问一句，确认后关掉模糊音并清空全部规则；seeded 不动，所以再打开时不会重新勾上全部规则。
   fire_and_forget reset_fuzzy_pinyin() {
     auto strong = get_strong();
@@ -5560,6 +5588,8 @@ private:
   bool selecting_ = false;
   bool refresh_queued_ = false;
   bool closed_ = false;
+  // 有 ContentDialog 正在显示；见 show_dialog。
+  bool dialog_open_ = false;
   bool pending_save_ = false;
   // 写盘连续失败的次数；大于零时文档里有没存下的修改，见 keep_unsaved_edit。
   std::size_t pending_save_failures_ = 0;

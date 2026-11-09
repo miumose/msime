@@ -17,12 +17,10 @@ namespace {
 } // namespace
 int main() {
   try {
-    // Physical strokes may trigger a shortcut and injected ones may not, except the voice hook's chord replay: with right Alt held for voice, the physical R of Ctrl+Shift+right Alt+R arrives without Alt and only the replay carries it.
+    // 真实的按键可以触发快捷键，本进程注入的不行，否则处理函数自己输入的按键会再触发自己。
     require(maintenance_stroke_may_trigger(false, 0));
-    require(maintenance_stroke_may_trigger(false, voice_chord_replay_extra_info));
     require(!maintenance_stroke_may_trigger(true, 0));
     require(!maintenance_stroke_may_trigger(true, 0x4D534D45u));
-    require(maintenance_stroke_may_trigger(true, voice_chord_replay_extra_info));
 
     // The three letter shortcuts.
     const auto clear = maintenance_hotkey('C', true, true, true);
@@ -69,16 +67,7 @@ int main() {
                               static_cast<uint32_t>(0x0D)}) // VK_RETURN
       require(!maintenance_hotkey(vk, true, true, true));
 
-    // Ctrl+Shift+Win+K opens the on-screen keyboard. It uses Win instead of
-    // Alt, so the Alt-based group must not claim it and it must not claim any
-    // of theirs.
-    const auto keyboard = maintenance_hotkey('K', true, true, false, true);
-    require(keyboard && keyboard->action == MaintenanceAction::OpenScreenKeyboard);
-    require(!maintenance_hotkey('K', true, true, true, false));
-    require(!maintenance_hotkey('K', true, true, false, false));
-    require(!maintenance_hotkey('K', true, false, false, true));
-    require(!maintenance_hotkey('K', false, true, false, true));
-    // Holding Win must not turn the Alt group into something else.
+    // Win 是第四个修饰键；带上它就不再是这组快捷键。
     require(!maintenance_hotkey('C', true, true, true, true));
     require(!maintenance_hotkey('3', true, true, true, true));
     // And the Alt group still works without Win.
