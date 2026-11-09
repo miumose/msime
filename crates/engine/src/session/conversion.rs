@@ -299,7 +299,7 @@ impl InputSession {
 
     /// 把改好的整句存成个人词条，规则与选中整句候选（`learn_sentence_candidate`）相同。
     fn learn_conversion_sentence(&mut self, item: &WordItem) -> Option<String> {
-        if !self.learning_enabled || !self.can_learn_sentence_candidate(item) {
+        if !self.learning_enabled || !self.can_learn_sentence_candidate() {
             return None;
         }
         let canonical = normalize_canonical_pinyin_for_word(&item.canonical_pinyin, &item.word);

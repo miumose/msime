@@ -35,7 +35,7 @@ use msime_engine::host::{
 use msime_engine::{
     release_idle_personal_models, validate_shuangpin_custom_profile, CandidateEdge, SchemeSet,
     SchemeType, ShuangpinCustomProfileError, ShuangpinCustomTable, ShuangpinCustomTablePart,
-    ShuangpinProfileKind, TextConversion,
+    ShuangpinProfileKind,
 };
 #[cfg(unix)]
 use msime_input_runtime::TranslationQuery;

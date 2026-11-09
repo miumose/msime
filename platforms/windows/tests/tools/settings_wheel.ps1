@@ -125,7 +125,7 @@ function Assert-SettingsWheelHitRegions($window, [IntPtr]$handle, [string]$label
 
         # 新版快捷键页只剩一个组；在输入页的两个实际卡片之间验证 issue 中的空白区域。
         Open-Page $window 'typing'
-        Select-PageTab $window 'input-tab-advanced' 'Shift+字母进入快捷模式'
+        Select-PageTab $window 'input-tab-advanced' '高级选项'
         $content = Find-ById $window 'settings-content'
         $pattern = $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
         if (-not $pattern.Current.VerticallyScrollable) { throw 'Inter-card fixture has no vertical scroll range' }
@@ -154,7 +154,7 @@ function Assert-SettingsWheelHitRegions($window, [IntPtr]$handle, [string]$label
         }
 
         Open-Page $window 'shortcuts'
-        Select-PageTab $window 'shortcuts-tab-settings' 'Ctrl+Space（由 Windows 管理）'
+        Select-PageTab $window 'shortcuts-tab-settings' '按键设置'
         $content = Find-ById $window 'settings-content'
         $pattern = $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
         Set-WheelOffset 0

@@ -101,7 +101,7 @@ pub(crate) fn evict_after_positions(
                 && (index > 0
                     || (!matches!(
                         other.source,
-                        CandidateSource::Emoji | CandidateSource::Kaomoji | CandidateSource::MixedJapanese
+                        CandidateSource::Emoji | CandidateSource::Kaomoji
                     ) && (other.source != CandidateSource::EnglishDictionary
                         || item.source == CandidateSource::EnglishDictionary)))
                 && demotion(other) == Demotion::Keep
@@ -185,7 +185,6 @@ pub(crate) fn spells_whole_input(
         SchemeType::Quanpin => same_spelling(&item.canonical_pinyin, input),
         SchemeType::Shuangpin => encode_pinyin(&item.canonical_pinyin, profile)
             .is_some_and(|code| same_spelling(&code, input)),
-        _ => false,
     }
 }
 
@@ -428,14 +427,13 @@ mod tests {
         assert_eq!(words(&lead), ["沙壁", "傻逼", "啥比"]);
     }
 
-    /// 二次降位仍按混输的首选约束找替补，不能把表情、英文或日文抬到首位。
+    /// 二次降位仍按混输的首选约束找替补，不能把表情或英文抬到首位。
     #[test]
     fn evicting_the_lead_keeps_mixed_rows_in_their_seats() {
         for source in [
             CandidateSource::Emoji,
             CandidateSource::Kaomoji,
             CandidateSource::EnglishDictionary,
-            CandidateSource::MixedJapanese,
         ] {
             let mut list = vec![
                 row("傻逼", CandidateSource::Database),
@@ -454,7 +452,6 @@ mod tests {
             CandidateSource::Emoji,
             CandidateSource::Kaomoji,
             CandidateSource::EnglishDictionary,
-            CandidateSource::MixedJapanese,
         ] {
             let mut list = vec![
                 row("别鸡巴", CandidateSource::Database),

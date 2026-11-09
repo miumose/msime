@@ -658,7 +658,6 @@ impl InputSession {
                             && !matches!(
                                 item.source,
                                 CandidateSource::EnglishDictionary
-                                    | CandidateSource::MixedJapanese
                                     | CandidateSource::Multilingual
                             ) =>
                     {

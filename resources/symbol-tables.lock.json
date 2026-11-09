@@ -11,12 +11,6 @@
     },
     {
       "path": "sources/symbols/latex-symbols.tsv",
-      "copy": "plugins/phrase_table/latex-symbols/symbols.tsv",
-      "size": 7374,
-      "sha256": "62fbce20f9f6f4b6f6c4a5a308447276fad218ea3e5bb2d411b9ae9fc71384a1"
-    },
-    {
-      "path": "sources/symbols/latex-symbols.tsv",
       "copy": "crates/engine/src/local/latex_symbols.tsv",
       "size": 7374,
       "sha256": "62fbce20f9f6f4b6f6c4a5a308447276fad218ea3e5bb2d411b9ae9fc71384a1"

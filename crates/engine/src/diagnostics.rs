@@ -1,6 +1,6 @@
 //! Every user-visible diagnostic and error message, verbatim from the C++ engine and bridge. Goldens record diagnostics and host tests compare error text, so modules use these constants instead of writing their own wording. Messages specific to one module's validation (personal dictionary edits, snapshot staging) live with that module but follow the same rule: copy the C++ text.
 
-// ---- KeyResult diagnostics (session, nine-key) ----
+// ---- KeyResult diagnostics (session) ----
 pub const ENGLISH_WORD_NOT_LEARNED: &str = "English word could not be learned.";
 pub const FREQUENCY_NOT_PERSISTED: &str = "Unable to persist candidate frequency adjustment.";
 pub const ENGLISH_FREQUENCY_NOT_PERSISTED: &str =
@@ -15,11 +15,6 @@ pub const AUTOCORRECT_PREFERENCE_NOT_PERSISTED: &str =
     "Autocorrect preference could not be persisted.";
 pub const PICK_TRANSITION_NOT_PERSISTED: &str = "Unable to persist the pick transition.";
 pub const PERSONAL_CONTEXT_NOT_PERSISTED: &str = "Unable to persist personal context.";
-pub const NINE_KEY_FREQUENCY_NOT_PERSISTED: &str =
-    "Unable to persist nine-key candidate frequency adjustment.";
-pub const NINE_KEY_REMOVAL_NOT_PERSISTED: &str = "Unable to persist nine-key candidate removal.";
-pub const NINE_KEY_POSITION_NOT_PERSISTED: &str = "Unable to persist nine-key candidate position.";
-pub const NINE_KEY_DIGIT_LIMIT: &str = "一次最多输入 48 个按键，请先选择候选";
 
 // ---- Local mode query diagnostics ----
 pub const QUICK_PHRASE_UNAVAILABLE: &str = "Quick phrase database is unavailable.";
@@ -127,26 +122,22 @@ pub enum DiagnosticCode {
     AutocorrectPreferenceNotPersisted = 10,
     PickTransitionNotPersisted = 11,
     PersonalContextNotPersisted = 12,
-    NineKeyFrequencyNotPersisted = 13,
-    NineKeyRemovalNotPersisted = 14,
-    NineKeyPositionNotPersisted = 15,
-    NineKeyDigitLimit = 16,
-    QuickPhraseUnavailable = 17,
-    QuickPhraseQueryFailed = 18,
-    EmojiUnavailable = 19,
-    EmojiQueryFailed = 20,
-    KaomojiUnavailable = 21,
-    KaomojiQueryFailed = 22,
-    SuperJianpinUnavailable = 23,
-    SuperJianpinQueryFailed = 24,
+    QuickPhraseUnavailable = 13,
+    QuickPhraseQueryFailed = 14,
+    EmojiUnavailable = 15,
+    EmojiQueryFailed = 16,
+    KaomojiUnavailable = 17,
+    KaomojiQueryFailed = 18,
+    SuperJianpinUnavailable = 19,
+    SuperJianpinQueryFailed = 20,
     /// 九键笔画筛选拿不到笔画词库（`LANGUAGE_DICTIONARY_UNAVAILABLE`）。这条常量放在宿主门面错误那段，因为它同时是查语言词库接口的错误文字。
-    LanguageDictionaryUnavailable = 25,
+    LanguageDictionaryUnavailable = 21,
     /// 不在映射表里的说明文字：注音的选字与按键把底层错误原文（`EngineError` 的 `Display`）放进诊断，这类文字没有自己的码。
     Other = 0xFFFF,
 }
 
 /// 诊断码与说明文字的映射表，KeyResult 诊断常量各占一行，按编号排。
-pub const DIAGNOSTIC_CODES: [(DiagnosticCode, &str); 25] = [
+pub const DIAGNOSTIC_CODES: [(DiagnosticCode, &str); 21] = [
     (
         DiagnosticCode::EnglishWordNotLearned,
         ENGLISH_WORD_NOT_LEARNED,
@@ -177,19 +168,6 @@ pub const DIAGNOSTIC_CODES: [(DiagnosticCode, &str); 25] = [
         DiagnosticCode::PersonalContextNotPersisted,
         PERSONAL_CONTEXT_NOT_PERSISTED,
     ),
-    (
-        DiagnosticCode::NineKeyFrequencyNotPersisted,
-        NINE_KEY_FREQUENCY_NOT_PERSISTED,
-    ),
-    (
-        DiagnosticCode::NineKeyRemovalNotPersisted,
-        NINE_KEY_REMOVAL_NOT_PERSISTED,
-    ),
-    (
-        DiagnosticCode::NineKeyPositionNotPersisted,
-        NINE_KEY_POSITION_NOT_PERSISTED,
-    ),
-    (DiagnosticCode::NineKeyDigitLimit, NINE_KEY_DIGIT_LIMIT),
     (
         DiagnosticCode::QuickPhraseUnavailable,
         QUICK_PHRASE_UNAVAILABLE,
@@ -257,16 +235,16 @@ mod tests {
             DiagnosticCode::Other
         );
         assert_eq!(
-            DiagnosticCode::from_message(NINE_KEY_DIGIT_LIMIT).value(),
-            16
+            DiagnosticCode::from_message(QUICK_PHRASE_UNAVAILABLE).value(),
+            13
         );
         assert_eq!(
             DiagnosticCode::from_message(SUPER_JIANPIN_QUERY_FAILED).value(),
-            24
+            20
         );
         assert_eq!(
             DiagnosticCode::from_message(LANGUAGE_DICTIONARY_UNAVAILABLE).value(),
-            25
+            21
         );
     }
 
@@ -303,7 +281,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 24);
+        assert_eq!(checked, 20);
     }
 
     /// 直接交给 `KeyResult::with_diagnostic` 的固定常量也都有码，不管它定义在本文件哪一段：九键笔画筛选给的 `LANGUAGE_DICTIONARY_UNAVAILABLE` 在宿主门面错误那段，按分段数漏掉过它。扫的是引擎源码里每个 `with_diagnostic(...)` 的实参（测试模块除外）。
@@ -380,8 +358,8 @@ mod tests {
             }
         }
         assert!(
-            passed.contains("LANGUAGE_DICTIONARY_UNAVAILABLE")
-                && passed.contains("NINE_KEY_DIGIT_LIMIT"),
+            passed.contains("POSITION_NOT_PERSISTED")
+                && passed.contains("PIN_NOT_PERSISTED"),
             "{passed:?}"
         );
     }

@@ -59,12 +59,12 @@ pub use types::{
     autocorrect_type, fuzzy_rule, request_autocorrect_mask, CandidateEdge, CandidateSource,
     Command, CommandTableEntry, CommandTranslationQuery, EnglishInputOptions, FirstPageRows,
     FrequencyAdjustmentMode, FrequencyAdjustmentOptions, FuzzyPinyinOptions, KeyResult,
-    LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions, NineKeyShuangpinKind,
-    NineKeyShuangpinTable, OnlineInputMode, OnlineQuery, PersonalDictionaryEntry,
+    LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
+    OnlineInputMode, OnlineQuery, PersonalDictionaryEntry,
     PersonalDictionaryKind, PluginCommand, PluginCommandQuery, QuickPhraseEntry, SchemeSet,
     SchemeType, SentenceAssociationOptions, ShuangpinCustomTable, ShuangpinHelpcodeModes,
-    ShuangpinProfileKind, SyllableHelpcode, TextConversion, WordItem, WubiInputOptions,
-    WubiProfileKind, DEFAULT_FIRST_PAGE_ROWS,
+    ShuangpinProfileKind, SyllableHelpcode, WordItem,
+    DEFAULT_FIRST_PAGE_ROWS,
 };
 // 辅助码表：`SessionOptions::helpcode_table` 与 `Session::set_helpcode_table` 收的就是它，宿主自己读表（辅助码表插件、没有文件系统的网页）时用这几项。
 pub use helpcode::{load_helpcode_keymap, load_helpcode_keymap_in, HelpcodeKeymap, SharedKeymap};

@@ -439,7 +439,6 @@ impl InputSession {
                 }
                 true
             }
-            LocalInputMode::TemporaryJapanese => return KeyResult::unhandled(),
             // 空 J 入口后的大写属于英文串；交给下方拒绝大写分支转回普通组字。
             LocalInputMode::SuperJianpin => {
                 letter
@@ -1629,7 +1628,7 @@ impl InputSession {
     }
 
     pub(super) fn commit_raw(&mut self) -> KeyResult {
-        let mut raw = self.raw_commit_text();
+        let raw = self.raw_commit_text();
         // 回车上屏的是屏幕上这段预编辑原文，本地模式的入口字母也算在内：临时模式以前把入口字母当标记丢掉，空输入时回车什么都不上屏（#7616）。进词库的词仍要去掉标记，见下面学习那一处。
         let mut diagnostic = None;
         if self.learn_english_on_enter
@@ -1677,7 +1676,6 @@ fn local_mode_enabled(options: LocalModeOptions, mode: LocalInputMode) -> bool {
         LocalInputMode::Kaomoji => options.kaomoji,
         LocalInputMode::SuperJianpin => options.super_jianpin,
         LocalInputMode::TemporaryEnglish => options.temporary_english,
-        LocalInputMode::TemporaryJapanese => false,
         LocalInputMode::Expression => options.expression,
         LocalInputMode::Command => options.command,
         LocalInputMode::Mention => options.mention,

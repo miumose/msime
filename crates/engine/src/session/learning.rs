@@ -184,7 +184,6 @@ impl InputSession {
                 matches!(
                     item.source,
                     CandidateSource::EnglishDictionary
-                        | CandidateSource::MixedJapanese
                         | CandidateSource::Multilingual
                 )
             })
@@ -296,7 +295,7 @@ impl InputSession {
         // Local shortcuts and English/Japanese modes also use Generated candidates, but they are not pinyin sentences and must never enter the pinyin user dictionary. A native wubi row is not one either, while a pinyin row beside it in a mixed list is (overlays.md §3.3).
         let (typo_diagnostic, online, canonical, word) = {
             let selected = self.ranking_list().get(index)?;
-            if !self.can_learn_sentence_candidate(selected) {
+            if !self.can_learn_sentence_candidate() {
                 return None;
             }
             let typo_diagnostic = self.learn_accepted_typos(selected);
@@ -330,7 +329,7 @@ impl InputSession {
         typo_diagnostic
     }
 
-    pub(super) fn can_learn_sentence_candidate(&self, selected: &WordItem) -> bool {
+    pub(super) fn can_learn_sentence_candidate(&self) -> bool {
         self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && self

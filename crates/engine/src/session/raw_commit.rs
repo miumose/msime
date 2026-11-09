@@ -50,11 +50,7 @@ impl Session {
             // 进词库的词去掉临时模式的入口字母：回车上屏的原文带它，词库里不该有（#7616）。只有入口字母时正文为空，那就没有词可学。
             let text = before.local_mode.without_entry_marker(commit);
             if !text.is_empty() {
-                let word = if before.local_mode == LocalInputMode::TemporaryJapanese {
-                    temporary_japanese_word(text)
-                } else {
-                    text.to_owned()
-                };
+                let word = text.to_owned();
                 let paths = &self.input.paths;
                 // 上屏已经发生；学不进去的词在结果旁边报告，不撤回上屏。
                 if learn_entered_english_word(
@@ -70,25 +66,5 @@ impl Session {
             }
         }
         result
-    }
-}
-
-/// 临时日文回车上屏的词按 `R` 加上屏文字去学，与入口字母的写法一致。
-fn temporary_japanese_word(commit: &str) -> String {
-    let mut word = String::with_capacity(1 + commit.len());
-    word.push('R');
-    word.push_str(commit);
-    word
-}
-
-#[cfg(test)]
-mod tests {
-    use super::temporary_japanese_word;
-
-    #[test]
-    fn temporary_japanese_word_allocates_only_result_bytes() {
-        let word = temporary_japanese_word("かな");
-        assert_eq!(word, "Rかな");
-        assert_eq!(word.capacity(), word.len());
     }
 }

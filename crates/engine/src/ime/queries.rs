@@ -285,7 +285,7 @@ impl CandidateQueries {
         preedit: &str,
         scheme: SchemeType,
         now: &LocalDateTime,
-        engine_candidates: &[WordItem],
+        _engine_candidates: &[WordItem],
     ) -> LocalQueryResult {
         // Every local preedit starts with its ASCII prefix letter (candidate_queries.cpp:15-99 strips it with `substr(1)`).
         let code = preedit.get(1..).unwrap_or_default();
@@ -325,7 +325,6 @@ impl CandidateQueries {
                 shuangpin,
             ),
             LocalInputMode::TemporaryEnglish => rows(self.temporary_english(code)),
-            LocalInputMode::TemporaryJapanese => rows(engine_candidates.to_vec()),
             LocalInputMode::Expression => rows(query_expression(code)),
             // 输入属于某条插件指令时，引擎不列任何行：插件的行由宿主问过插件之后写进会话的缓存，在那之前由兜底行顶着。
             LocalInputMode::Command if self.plugin_command_source(code).is_some() => {
@@ -530,14 +529,13 @@ pub(crate) fn counts_toward_quick_phrase_slot(item: &WordItem) -> bool {
             | CandidateSource::EnglishDictionary
             | CandidateSource::Emoji
             | CandidateSource::Kaomoji
-            | CandidateSource::MixedJapanese
             | CandidateSource::Multilingual
             | CandidateSource::Plugin
             | CandidateSource::Contact
     )
 }
 
-/// 输入能不能整段切成完整音节。全拼看严格的完整音节（不认纠错和别名），双拼看是不是每两键一个音节；其余方案不让英文、日文领先，按完整算。
+/// 输入能不能整段切成完整音节。全拼看严格的完整音节（不认纠错和别名），双拼看是不是每两键一个音节。
 pub(crate) fn spells_whole_syllables(
     input: &str,
     scheme: SchemeType,
@@ -546,7 +544,6 @@ pub(crate) fn spells_whole_syllables(
     match scheme {
         SchemeType::Quanpin => crate::pinyin::segment::is_complete_pinyin_input(input),
         SchemeType::Shuangpin => crate::shuangpin::query::is_complete_input(input, profile),
-        _ => true,
     }
 }
 

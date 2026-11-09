@@ -1840,19 +1840,6 @@ INSERT INTO tbl_1_t VALUES('ta','t','他',100);\
 CREATE TABLE tbl_1_m(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
 INSERT INTO tbl_1_m VALUES('ma','m','吗',100);";
 
-/// 列表里日文混输行的下标；没有时为 `None`，有两行就失败。
-fn japanese_index(session: &Session) -> Option<usize> {
-    let sources = candidate_sources(session);
-    let mut rows = sources
-        .iter()
-        .enumerate()
-        .filter(|(_, source)| **source == CandidateSource::MixedJapanese)
-        .map(|(index, _)| index);
-    let first = rows.next();
-    assert_eq!(rows.next(), None, "{:?}", words(session));
-    first
-}
-
 /// The prefix request carries the session's fuzzy rules.
 #[test]
 fn caret_prefix_applies_fuzzy_pinyin() {
@@ -4280,105 +4267,6 @@ fn chinese_caret_editing_does_not_claim_the_japanese_long_vowel_key() {
         assert!(result.commit.is_none(), "{scheme:?}");
         assert_eq!(session.snapshot(), before, "{scheme:?}");
     }
-}
-
-#[test]
-fn temporary_japanese_long_vowels_preserve_composition_and_commit_katakana() {
-    let fixture = Fixture::new(QUANPIN_FIXTURE);
-    for scheme in [SchemeType::Quanpin, SchemeType::Shuangpin] {
-        for punctuation_route in [false, true] {
-            let mut session = fixture.session_with(|options| options.scheme = scheme);
-            assert!(session.character(b'R', true).handled);
-            for byte in b"ko-hi-" {
-                let result = if punctuation_route && *byte == b'-' {
-                    session.punctuation(*byte)
-                } else {
-                    session.character(*byte, false)
-                };
-                assert!(result.handled, "{scheme:?}, {punctuation_route}, {byte}");
-                assert!(result.commit.is_none(), "{result:?}");
-            }
-            let snapshot = session.snapshot();
-            assert_eq!(snapshot.editing_text, "Rko-hi-");
-            assert_eq!(snapshot.scheme, scheme);
-            assert_eq!(snapshot.local_mode, LocalInputMode::TemporaryJapanese);
-            let index = snapshot
-                .candidates
-                .iter()
-                .position(|row| row.word == "コーヒー")
-                .unwrap();
-            assert_eq!(session.select(index).commit.as_deref(), Some("コーヒー"));
-            assert_eq!(session.snapshot().scheme, scheme);
-            assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
-            assert!(!session.snapshot().spelling_symbols.contains('-'));
-        }
-    }
-}
-
-#[test]
-fn temporary_japanese_long_vowel_can_be_inserted_and_erased_inside_romaji() {
-    let fixture = Fixture::new(QUANPIN_FIXTURE);
-    for scheme in [SchemeType::Quanpin, SchemeType::Shuangpin] {
-        let mut session = fixture.session_with(|options| options.scheme = scheme);
-        session.character(b'R', true);
-        type_text(&mut session, "kohi");
-        session.set_caret(Some(3));
-        let result = session.character(b'-', false);
-        assert!(result.handled);
-        assert!(result.commit.is_none());
-        assert_eq!(session.snapshot().editing_text, "Rko-hi");
-        assert_eq!(session.snapshot().caret_position, 4);
-        assert!(words(&session).contains(&"コーヒ".to_owned()));
-        session.command(Command::Backspace);
-        assert_eq!(session.snapshot().editing_text, "Rkohi");
-        assert_eq!(session.snapshot().caret_position, 3);
-        assert_eq!(
-            session.snapshot().local_mode,
-            LocalInputMode::TemporaryJapanese
-        );
-        assert_eq!(session.snapshot().scheme, scheme);
-    }
-}
-
-#[test]
-fn temporary_japanese_returns_to_the_original_scheme() {
-    let fixture = Fixture::new(QUANPIN_FIXTURE);
-    let mut session = fixture.session_with(|options| {
-        options.scheme = SchemeType::Shuangpin;
-        options.shuangpin_preedit_uses_raw = false;
-    });
-    assert!(session.character(b'R', true).handled);
-    let snapshot = session.snapshot();
-    assert_eq!(snapshot.preedit, "R");
-    assert_eq!(snapshot.scheme, SchemeType::Shuangpin);
-    assert_eq!(snapshot.candidates[0].source, CandidateSource::Fallback);
-    type_text(&mut session, "ka");
-    assert!(words(&session).contains(&"か".to_owned()));
-    let snapshot = session.snapshot();
-    assert_eq!(snapshot.editing_text, "Rka");
-    assert_eq!(
-        snapshot.editing_text.capacity(),
-        snapshot.editing_text.len()
-    );
-    assert!(session.input.local_preedit.capacity() >= session.input.local_preedit.len());
-    session.command(Command::Backspace);
-    assert_eq!(session.snapshot().preedit, "Rk");
-    assert_eq!(
-        session.command(Command::CommitRaw).commit.as_deref(),
-        Some("Rk")
-    );
-    assert_eq!(session.snapshot().scheme, SchemeType::Shuangpin);
-    assert_eq!(
-        session.input.engine.current_scheme_type(),
-        SchemeType::Shuangpin
-    );
-
-    session.character(b'R', true);
-    assert_eq!(session.finish(0).commit.as_deref(), Some("R"));
-    assert_eq!(
-        session.input.engine.current_scheme_type(),
-        SchemeType::Shuangpin
-    );
 }
 
 #[test]

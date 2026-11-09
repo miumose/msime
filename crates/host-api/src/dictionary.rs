@@ -2315,14 +2315,6 @@ pub enum WordKind {
 }
 
 impl WordKind {
-    /// 五笔方案下，会话所用码表版本（`EngineOptions::wubi_profile`，0 是 86、1 是 98、2 是新世纪）的词归入的种类；不认识的编码为 `None`。
-    fn of_wubi_profile(profile: u8) -> Option<Self> {
-        match msime_engine::WubiProfileKind::from_u8(profile)? {
-            msime_engine::WubiProfileKind::Wubi86 => Some(Self::Wubi),
-            msime_engine::WubiProfileKind::Wubi98 => Some(Self::Wubi98),
-            msime_engine::WubiProfileKind::WubiXsj => Some(Self::WubiXsj),
-        }
-    }
 }
 
 impl From<WordKind> for Kind {

@@ -678,14 +678,11 @@ impl InputSession {
         {
             let input = match scheme {
                 SchemeType::Quanpin => {
-                    Some(Cow::Borrowed(self.engine.request().raw_input.as_str()))
+                    Cow::Borrowed(self.engine.request().raw_input.as_str())
                 }
-                SchemeType::Shuangpin => Some(self.pinyin_ranking_context()),
-                _ => None,
+                SchemeType::Shuangpin => self.pinyin_ranking_context(),
             };
-            if let Some(input) = input {
-                self.queries.append_contact_candidates(&input, &mut mixed);
-            }
+            self.queries.append_contact_candidates(&input, &mut mixed);
         }
         mixed
     }

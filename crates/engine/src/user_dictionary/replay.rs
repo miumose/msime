@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OpenFlags, Row, ToSql};
 
 use crate::dictionary::english::ensure_english_schema;
 use crate::format;
-use crate::types::{PersonalDictionaryKind, WubiProfileKind};
+use crate::types::PersonalDictionaryKind;
 use crate::user_dictionary::journal::{open_database, BUSY_TIMEOUT_MS};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -70,9 +70,8 @@ fn replay_with(user_db: &Path, main_db: Option<&Path>, english_db: &Path) -> Rep
     }
     // 代次里有哪几张五笔表。资源目录不带 `msime-wubi.db`（macOS 发布包改为按需下载）时一张都没有，词库是还没有新世纪表的旧发布时缺 `wubixsj`：这一版的五笔行没有能写的表，与没有拼音库的代次一样计入 `skipped`，行留在日志里，码表并进来后的那次回放再写（`generation::merge_downloaded_wubi`）。只看这一行自己的表，别的五笔表在不在不影响它。读不出 schema 时当作表在，交给写入去报告。
     let wubi_tables: Vec<&str> = if main_db.is_some() {
-        WubiProfileKind::ALL
-            .iter()
-            .map(|profile| profile.table())
+        ["wubi", "wubi98", "wubixsj"]
+            .into_iter()
             .filter(|table| {
                 main.query_row(
                     "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?1)",

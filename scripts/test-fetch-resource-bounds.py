@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locked model and voice downloads enforce their sizes while streaming."""
+"""Locked model downloads enforce their sizes while streaming."""
 
 import hashlib
 import pathlib
@@ -14,7 +14,6 @@ import fetch_handwriting_model  # noqa: E402
 import fetch_onnxruntime  # noqa: E402
 import fetch_rerank_model  # noqa: E402
 import fetch_settled_model  # noqa: E402
-import fetch_voice_runtime  # noqa: E402
 
 
 class Response:
@@ -77,12 +76,11 @@ def main():
     exercise(fetch_onnxruntime, failures)
     exercise(fetch_rerank_model, failures)
     exercise(fetch_settled_model, failures)
-    exercise(fetch_voice_runtime, failures)
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print("settled model and voice downloads enforce lock sizes while streaming")
+    print("settled model downloads enforce lock sizes while streaming")
     return 0
 
 

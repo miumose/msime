@@ -179,15 +179,6 @@ char *msime_client_focus(uint64_t, bool focused) {
   }
   return answer({{"handled", true}, {"commit", nullptr}, {"diagnostic", nullptr}, {"view", view()}});
 }
-// 这个夹具只验证确定键盘的生命周期；组码路径由独立双会话测试覆盖，误入必须失败。
-char *msime_client_set_key_grid(uint64_t, uint8_t) {
-  std::cerr << "Unexpected key grid call in lifecycle fixture\n";
-  std::abort();
-}
-char *msime_client_grid_key(uint64_t, uint8_t) {
-  std::cerr << "Unexpected grouped key call in lifecycle fixture\n";
-  std::abort();
-}
 char *msime_client_character(uint64_t, uint8_t ascii, bool) {
   record("character", ascii);
   // 韩文这样的方案里，开始新音节的字母带着上一个音节上屏（TIP 已经从自己的会话把它写进了文档）。
@@ -268,11 +259,7 @@ uint32_t msime_client_typing_effect(uint64_t, uint32_t event) {
   record("typing_effect", event);
   return 0;
 }
-char *msime_client_typing_effect_settings(uint64_t) { return answer(nlohmann::json::object()); }
-char *msime_client_online_query(uint64_t) { return answer(nullptr); }
-char *msime_client_translation_query(uint64_t) { return answer(nullptr); }
 // 以下这些在这里走到的路径上用不到，只为链接。
-char *msime_client_ai_request_for_query(uint64_t, const uint8_t *, size_t) { return answer(nullptr); }
 char *msime_client_apply_cloud_response(uint64_t, const uint8_t *, size_t, const uint8_t *, size_t) {
   return answer(nullptr);
 }
@@ -281,14 +268,12 @@ char *msime_client_apply_online_candidates(uint64_t, const uint8_t *, size_t, co
 }
 char *msime_client_resolve_online_candidates(uint64_t, const uint8_t *, size_t, uint8_t) { return answer(nullptr); }
 char *msime_client_clear_online_candidates(uint64_t, uint8_t) { return answer(nullptr); }
-char *msime_client_apply_translations(uint64_t, uint64_t, const uint8_t *, size_t) { return answer(nullptr); }
 char *msime_client_rerank_settled(uint64_t) { return answer(nullptr); }
 char *msime_client_reset_cache(uint64_t) { return answer(nullptr); }
 char *msime_client_update_preferences(uint64_t, const uint8_t *, size_t) {
   return answer({{"handled", true}, {"commit", nullptr}, {"diagnostic", nullptr}, {"view", view()}});
 }
 char *msime_client_set_chinese_punctuation(uint64_t, bool) { return answer(nullptr); }
-char *msime_client_set_multilingual_output(uint64_t, bool) { return answer(nullptr); }
 char *msime_client_set_english_mode(uint64_t, bool) { return answer(view()); }
 char *msime_client_balance_paired_punctuation_after_auto_close(uint64_t, uint8_t) { return answer(nullptr); }
 char *msime_client_punctuation(uint64_t, uint8_t) { return transition(nullptr); }
@@ -298,8 +283,6 @@ char *msime_client_remove_candidate(uint64_t, uint64_t, size_t) { return transit
 char *msime_client_fix_candidate_position(uint64_t, uint64_t, size_t, uint8_t) { return transition(nullptr); }
 char *msime_client_clear_candidate_position(uint64_t, uint64_t, size_t) { return transition(nullptr); }
 char *msime_client_simplified_to_traditional(const uint8_t *, size_t) { return nullptr; }
-char *msime_client_typing_statistics(const uint8_t *, size_t) { return answer(nullptr); }
-int32_t msime_client_typing_statistics_enabled(const uint8_t *, size_t) { return 0; }
 }
 
 int main() {

@@ -224,7 +224,7 @@ impl InputSession {
             // The bare prefix letter of a temporary mode is a marker, not text.
             None if matches!(
                 self.local_mode,
-                LocalInputMode::TemporaryEnglish | LocalInputMode::TemporaryJapanese
+                LocalInputMode::TemporaryEnglish
             ) && self.local_preedit.len() == 1 =>
             {
                 None

@@ -181,7 +181,6 @@ impl LocalModeClass {
         match LocalInputMode::from_name(name) {
             Some(LocalInputMode::None) => Self::None,
             Some(LocalInputMode::TemporaryEnglish) => Self::TemporaryEnglish,
-            Some(LocalInputMode::TemporaryJapanese) => Self::TemporaryJapanese,
             Some(LocalInputMode::SuperJianpin) => Self::SuperJianpin,
             Some(LocalInputMode::Emoji) => Self::Emoji,
             Some(LocalInputMode::Kaomoji) => Self::Kaomoji,

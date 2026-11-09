@@ -1,5 +1,5 @@
 符号模式（S 模式）按它查命令名的 LaTeX 命令名到 Unicode 码位对照表（crates/engine/src/local/latex_symbols.tsv，由 msime-dictionary 的 sources/symbols/latex-symbols.tsv 同步），本项目自写，编进输入引擎。
-许可证：MIT，与官方短语表「LaTeX 符号」同一份。下面是 plugins/phrase_table/LICENSE 的原文；表也随那个短语表包分发，但不带短语表包的构建同样编进了它，所以这份声明随引擎走。
+许可证：MIT。下面是 MIT 许可证正文；这份声明随引擎走。
 
 ==============================================================================
 

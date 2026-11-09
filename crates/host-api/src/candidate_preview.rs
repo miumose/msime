@@ -90,7 +90,6 @@ pub fn source_name(source: u8) -> &'static str {
         Some(Source::Fallback) => "fallback",
         Some(Source::NeuralKeyboard) => "sentence_model",
         Some(Source::AiPending) => "ai_pending",
-        Some(Source::MixedJapanese) => "japanese",
         Some(Source::Plugin) => "plugin",
         Some(Source::CloudPending) => "cloud_pending",
         Some(Source::Contact) => "contact",

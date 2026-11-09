@@ -962,12 +962,6 @@ set_tests_properties(windows-candidate-action-availability PROPERTIES TIMEOUT 10
 # provider preferences have just switched off - and none of that shows up
 # anywhere else. Both take an injectable fetcher for the same reason the cloud
 # worker does.
-# AI 接口地址策略经 msime_client_ai_endpoint_check 逐条跑各平台共用的 shared/contracts/ai-endpoint/cases.json。用例在配置时转成字节数组编进测试，Wine 容器里不挂仓库也能跑；改用例会触发重新配置。
-set(MSIME_AI_ENDPOINT_CASES "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/contracts/ai-endpoint/cases.json")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MSIME_AI_ENDPOINT_CASES}")
-file(READ "${MSIME_AI_ENDPOINT_CASES}" msime_ai_endpoint_cases_hex HEX)
-string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," msime_ai_endpoint_cases_bytes "${msime_ai_endpoint_cases_hex}")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/ai_endpoint_cases.inc" "${msime_ai_endpoint_cases_bytes}\n")
 target_link_libraries(windows-session-smoke PRIVATE msime-windows-pump)
 add_executable(windows-input-queue tests/input/input_queue.cpp)
 target_link_libraries(windows-input-queue PRIVATE msime-windows-input)

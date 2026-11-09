@@ -156,9 +156,6 @@ const AI_SEAT_SOURCES: [u8; 2] = [3, 12];
 /// `CandidateSource::EnglishDictionary`。混输英文只在拼音拆不开、英文完全匹配（或用户固定在第一位）时才由引擎放到首位，那是引擎有意的安排；句子模型读的是中文，不能因为英文行不算词典命中就把中文行转到它前面。这道检查不分方案和模式：只有英文行的列表（比如专用英文模式、临时英文）首行也是英文，同样不重排，这是有意的：模型读的是中文，比较英文行没有意义。
 const ENGLISH_SOURCE: u8 = 4;
 
-/// `CandidateSource::MixedJapanese`：日文混输行。它领先时是引擎判定拼音给不出整段的词，和领先的英文一样不重排；它在别的位置时也不让模型拿它比较、把它提到首位，句子模型读的是中文。
-const MIXED_JAPANESE_SOURCE: u8 = 13;
-
 /// 候选列表通常不超过一页；短列表的文本引用放在栈上，较大列表继续走堆缓冲。
 const SMALL_RERANK_TEXTS: usize = 128;
 
@@ -511,7 +508,6 @@ fn row_answers_key(scheme: u8, row: OrderRow<'_>) -> bool {
     row.answers_key
         && !CATALOG_SOURCES.contains(&row.source)
         && !AI_SEAT_SOURCES.contains(&row.source)
-        && row.source != MIXED_JAPANESE_SOURCE
         && (corrections_may_lead(scheme) || !row.corrected)
 }
 
@@ -520,13 +516,9 @@ fn any_corrected_key<'a, R: OrderRowSource<'a> + ?Sized>(scheme: u8, rows: &'a R
 }
 
 /// 判断 `rerank_pick` 是否需要运行模型，提前拒绝时宿主无需把停顿模型移出会话线程。
-///
-/// 韩文汉字候选按单音节词频排表，不能用中文模型评分。五笔码表回答的列表先排表码行，
-/// 再追加拼音纠错行；若让纠错规则撤销表码首选的豁免，就会把 `dyn` 的「态」挤到
-/// `dynn` 的「太快」之后。只有完全由拼音兜底回答的五笔列表才按拼音重排。
 pub fn rerank_needs_model<'a, R: OrderRowSource<'a> + ?Sized>(
     scheme: u8,
-    answered_by_pinyin_fallback: bool,
+    _answered_by_pinyin_fallback: bool,
     rows: &'a R,
 ) -> bool {
     if !reorders_candidates(scheme) {
@@ -536,8 +528,8 @@ pub fn rerank_needs_model<'a, R: OrderRowSource<'a> + ?Sized>(
         return false;
     }
     let leader = rows.get(0);
-    // 引擎让英文或日文混输行领先的列表原样保留，见 `ENGLISH_SOURCE`、`MIXED_JAPANESE_SOURCE`。
-    if matches!(leader.source, ENGLISH_SOURCE | MIXED_JAPANESE_SOURCE) {
+    // 引擎让英文行领先的列表原样保留，见 `ENGLISH_SOURCE`。
+    if leader.source == ENGLISH_SOURCE {
         return false;
     }
     // 首行不回答当前按键时，上游同样拒绝比较，无需准备模型输入。
@@ -556,12 +548,12 @@ pub fn rerank_needs_model<'a, R: OrderRowSource<'a> + ?Sized>(
 
 /// rerank() 的决策部分：返回应当移到首位的行下标；None 表示不动。
 ///
-/// `scheme` 是 `SchemeType` 序号；不允许重排的方案（韩文汉字表）返回 None，五笔且 `!answered_by_pinyin_fallback` 时返回 None，行数 < 2 时返回 None，首行是英文时返回 None。打分器要续用跨按键的缓存，因此取 `&mut`。
+/// `scheme` 是 `SchemeType` 序号；行数 < 2 时返回 None，首行是英文时返回 None。打分器要续用跨按键的缓存，因此取 `&mut`。`_answered_by_pinyin_fallback` 保留给宿主 ABI，拼音方案不读它。
 pub fn rerank_pick<'a, R: OrderRowSource<'a> + ?Sized>(
     reranker: &mut dyn CandidateScorer,
     context: &str,
     scheme: u8,
-    answered_by_pinyin_fallback: bool,
+    _answered_by_pinyin_fallback: bool,
     rows: &'a R,
 ) -> Option<usize> {
     let pool = reranker.sentence_pool();
@@ -569,7 +561,7 @@ pub fn rerank_pick<'a, R: OrderRowSource<'a> + ?Sized>(
         reranker,
         context,
         scheme,
-        answered_by_pinyin_fallback,
+        _answered_by_pinyin_fallback,
         rows,
         pool,
     )
@@ -580,11 +572,11 @@ pub fn rerank_pick_within<'a, R: OrderRowSource<'a> + ?Sized>(
     reranker: &mut dyn CandidateScorer,
     context: &str,
     scheme: u8,
-    answered_by_pinyin_fallback: bool,
+    _answered_by_pinyin_fallback: bool,
     rows: &'a R,
     pool: usize,
 ) -> Option<usize> {
-    if !rerank_needs_model(scheme, answered_by_pinyin_fallback, rows) {
+    if !rerank_needs_model(scheme, _answered_by_pinyin_fallback, rows) {
         return None;
     }
     let mut contested = [0; CONTEST_LIMIT];

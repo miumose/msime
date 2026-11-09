@@ -16,7 +16,6 @@ telemetry-loopback = ["msime-client-services/telemetry-loopback"]
 
 [dependencies]
 msime-client-core = { path = "../client-core" }
-msime-client-providers = { path = "../client-providers" }
 msime-client-services = { path = "../client-services" }
 msime-path-trust = { path = "../path-trust" }
 msime-engine = { path = "../engine" }

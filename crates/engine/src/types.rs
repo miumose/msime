@@ -22,8 +22,6 @@ pub enum CandidateSource {
     NeuralKeyboard = 11,
     /// AI 候选的占位行（#6888），已退役：共享内核不再产生它，AI 回答到达时第一条直接插在第一页最后一格（`.agents/notes/implemented/feature/2026-10-16-ai-candidate-last-slot.md`）。值保留不复用；引擎和宿主对它的处理（不能上屏、不学习、不计入统计、画成暗色）照旧，旧版本留下的行仍按这些规则处理。
     AiPending = 12,
-    /// 日文混输（实验选项，默认关）混进全拼、双拼候选的那一行：整段输入按罗马字转换出的最佳日文。它不属于下面任何一个谓词，所以选中时整段上屏并结束组字（与混输英文同一条路），不调词频、不记整句、不进个人上下文，也不能置顶、固定或删除；宿主不对它做简繁转换。
-    MixedJapanese = 13,
     /// 脚本插件在自己的 `/` 指令里给出的行，只在桌面产生（宿主经 `Session::apply_plugin_command_rows` 写进来）。它不属于下面任何一个谓词：选中时整段上屏并结束组字，不调词频、不记整句、不进个人上下文，不能置顶、固定或删除；runtime 不把它的上屏喂进 AI 上文，宿主不为它请求释义或翻译，上屏也不转全角。
     Plugin = 14,
     /// 云候选尚在请求中；它占据云候选的固定位置，回答到达时由第一条云候选替换。值追加在已有 ABI 之后，不能复用旧值。
@@ -52,7 +50,6 @@ impl CandidateSource {
             9 => Self::Fallback,
             11 => Self::NeuralKeyboard,
             12 => Self::AiPending,
-            13 => Self::MixedJapanese,
             14 => Self::Plugin,
             15 => Self::CloudPending,
             16 => Self::Contact,
@@ -340,120 +337,6 @@ pub struct ShuangpinCustomTable {
     pub initials: Vec<(String, String)>,
     pub finals: Vec<(String, String)>,
     pub zero_initials: Vec<(String, String)>,
-}
-
-/// 九键双拼方案（#6572）。序号是宿主 ABI 值，名字是共享偏好 `nine_key_shuangpin_profile` 的取值。内置方案只收录能找到完整、前后一致的公开描述的那几个，来源见 `.agents/notes/implemented/feature/2026-10-10-nine-key-shuangpin.md`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[repr(u8)]
-pub enum NineKeyShuangpinKind {
-    /// 米旮旯 2。
-    Migala2 = 0,
-    /// 米旮旯 3（用 0 键的那一版）。
-    #[default]
-    Migala3 = 1,
-    /// 辜氏 2 低重码。
-    Gushi2Low = 2,
-    /// 用户自己的表，在 [`NineKeyShuangpinTable`] 里，没有内置的表。
-    Custom = 3,
-}
-
-impl NineKeyShuangpinKind {
-    /// 有内置表的方案，按序号。
-    pub const BUILTIN: [Self; 3] = [Self::Migala2, Self::Migala3, Self::Gushi2Low];
-
-    pub fn from_u8(value: u8) -> Option<Self> {
-        Some(match value {
-            0 => Self::Migala2,
-            1 => Self::Migala3,
-            2 => Self::Gushi2Low,
-            3 => Self::Custom,
-            _ => return None,
-        })
-    }
-
-    /// 只认确切的名字，不认识的名字返回 `None`，由调用方决定怎么处理。
-    pub fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "migala2" => Self::Migala2,
-            "migala3" => Self::Migala3,
-            "gushi2_low" => Self::Gushi2Low,
-            "custom" => Self::Custom,
-            _ => return None,
-        })
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Migala2 => "migala2",
-            Self::Migala3 => "migala3",
-            Self::Gushi2Low => "gushi2_low",
-            Self::Custom => "custom",
-        }
-    }
-}
-
-/// 九键双拼的键位表（共享偏好 `nine_key_shuangpin_custom_profile`），形状与 [`ShuangpinCustomTable`] 相同，键换成数字：`initials` 给 23 个声母（含 `zh` `ch` `sh`）各一个数字，`finals` 给 33 个韵母各一个数字，`zero_initials` 给 12 个零声母音节各一个两位数字编码。数字可以是 `0`–`9`，`ü` 写作 `v`。表合不合法由 Engine 判定（见 `nine_key_shuangpin`），顺序无关。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct NineKeyShuangpinTable {
-    pub initials: Vec<(String, String)>,
-    pub finals: Vec<(String, String)>,
-    pub zero_initials: Vec<(String, String)>,
-}
-
-/// 五笔码表版本。序号即宿主 ABI 值（`EngineOptions::wubi_profile`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[repr(u8)]
-pub enum WubiProfileKind {
-    #[default]
-    Wubi86 = 0,
-    Wubi98 = 1,
-    /// 新世纪五笔，码表 `wubixsj`。序号追加在末尾，已有的值不变。
-    WubiXsj = 2,
-}
-
-impl WubiProfileKind {
-    /// 全部版本，按序号排列。
-    pub const ALL: [Self; 3] = [Self::Wubi86, Self::Wubi98, Self::WubiXsj];
-
-    pub fn from_u8(value: u8) -> Option<Self> {
-        Some(match value {
-            0 => Self::Wubi86,
-            1 => Self::Wubi98,
-            2 => Self::WubiXsj,
-            _ => return None,
-        })
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "wubi86" => Self::Wubi86,
-            "wubi98" => Self::Wubi98,
-            "wubixsj" => Self::WubiXsj,
-            _ => return None,
-        })
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Wubi86 => "wubi86",
-            Self::Wubi98 => "wubi98",
-            Self::WubiXsj => "wubixsj",
-        }
-    }
-
-    /// `msime-pinyin.db` 里这一版的码表，表名与 `name` 相同。
-    pub fn table(self) -> &'static str {
-        self.name()
-    }
-
-    /// 这一版的个人词条和学习记录归入的词库种类。
-    pub fn dictionary_kind(self) -> PersonalDictionaryKind {
-        match self {
-            Self::Wubi86 => PersonalDictionaryKind::Wubi,
-            Self::Wubi98 => PersonalDictionaryKind::Wubi98,
-            Self::WubiXsj => PersonalDictionaryKind::WubiXsj,
-        }
-    }
 }
 
 pub use crate::shared_string::SharedString;
@@ -912,7 +795,6 @@ pub enum LocalInputMode {
     Kaomoji,
     SuperJianpin,
     TemporaryEnglish,
-    TemporaryJapanese,
     /// `V`: a calculator, Chinese numerals and dates.
     Expression,
     /// `/`: built-in commands and the host's command table.
@@ -939,7 +821,6 @@ impl LocalInputMode {
             Self::Kaomoji => "kaomoji",
             Self::SuperJianpin => "super_jianpin",
             Self::TemporaryEnglish => "temporary_english",
-            Self::TemporaryJapanese => "temporary_japanese",
             Self::Expression => "expression",
             Self::Command => "command",
             Self::Mention => "mention",
@@ -960,7 +841,6 @@ impl LocalInputMode {
             Self::Kaomoji,
             Self::SuperJianpin,
             Self::TemporaryEnglish,
-            Self::TemporaryJapanese,
             Self::Expression,
             Self::Command,
             Self::Mention,
@@ -978,7 +858,6 @@ impl LocalInputMode {
             Self::Unicode => "0123456789",
             Self::Expression => crate::local::expression::SPELLING_SYMBOLS,
             Self::Url => crate::local::url::SPELLING_SYMBOLS,
-            Self::TemporaryJapanese => "-",
             _ => "",
         }
     }
@@ -991,7 +870,7 @@ impl LocalInputMode {
     /// 去掉临时模式预编辑开头的入口字母（`Y`、`R`）。它是模式标记、不是用户打的字，所以进词库的词不能带它；回车原样上屏时它算文本（#7616），那一处不走这里。
     pub fn without_entry_marker(self, text: &str) -> &str {
         match self {
-            Self::TemporaryEnglish | Self::TemporaryJapanese => text.get(1..).unwrap_or_default(),
+            Self::TemporaryEnglish => text.get(1..).unwrap_or_default(),
             _ => text,
         }
     }
@@ -1181,40 +1060,6 @@ pub struct MixedExpressiveOptions {
     pub symbol_candidates: bool,
 }
 
-/// 宿主交给引擎的一段文字转换，例如粤拼输出简体时的繁转简（`SessionOptions::cantonese_output_conversion`）。引擎不带转换数据，宿主从自己的共享层传入函数；两个转换按函数地址判断相等。
-#[derive(Clone, Copy)]
-pub struct TextConversion(pub fn(&str) -> String);
-
-impl TextConversion {
-    pub fn apply(self, text: &str) -> String {
-        (self.0)(text)
-    }
-}
-
-impl PartialEq for TextConversion {
-    fn eq(&self, other: &Self) -> bool {
-        std::ptr::fn_addr_eq(self.0, other.0)
-    }
-}
-
-impl std::fmt::Debug for TextConversion {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("TextConversion(..)")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct WubiInputOptions {
-    /// Answer an unmatched wubi code with quanpin candidates for the same letters.
-    pub mixed_pinyin: bool,
-    /// 查询、学习和删除所用的码表版本。
-    pub profile: WubiProfileKind,
-    /// `z` 通配：码里的 `z` 匹配码表该位置的任意一个字母（含首位）。
-    ///
-    /// 与混输无关：混输里 `z` 是普通拼音字母，这里它是未知码位。两者都关时 `z` 不进码。
-    pub z_wildcard: bool,
-}
-
 /// 在线请求的输入语义；缺省沿用原有的拼音及方案转换路径。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1310,9 +1155,9 @@ impl PersonalDictionaryKind {
     /// 五笔种类对应的 `msime-pinyin.db` 码表。
     pub fn wubi_table(self) -> Option<&'static str> {
         match self {
-            Self::Wubi => Some(WubiProfileKind::Wubi86.table()),
-            Self::Wubi98 => Some(WubiProfileKind::Wubi98.table()),
-            Self::WubiXsj => Some(WubiProfileKind::WubiXsj.table()),
+            Self::Wubi => Some("wubi"),
+            Self::Wubi98 => Some("wubi98"),
+            Self::WubiXsj => Some("wubixsj"),
             Self::Pinyin | Self::QuickPhrase | Self::English | Self::Cantonese => None,
         }
     }
@@ -1372,23 +1217,15 @@ impl Default for PersonalDictionaryEntry {
 mod tests {
     use super::{CandidateSource, SchemeSet, SchemeType, WordItem};
 
-    /// 线上的来源编号按值往返；10 空着（原 `NeuralDesktop`，未发布就删了）。日文混输行（13）不属于任何谓词：上屏走整段结束组字的路，不学习，不坐在线座位。
+    /// 线上的来源编号按值往返；10 空着（原 `NeuralDesktop`，未发布就删了），13 空着（原日文混输行，随非拼音方案一起删除）。
     #[test]
-    fn candidate_sources_round_trip_and_mixed_japanese_matches_no_predicate() {
+    fn candidate_sources_round_trip() {
         for value in 0..=u8::MAX {
             match CandidateSource::from_u8(value) {
                 Some(source) => assert_eq!(source as u8, value),
-                None => assert!(value == 10 || value > 14, "{value}"),
+                None => assert!(value == 10 || value == 13 || value > 18, "{value}"),
             }
         }
-        let japanese = CandidateSource::MixedJapanese;
-        assert_eq!(CandidateSource::from_u8(13), Some(japanese));
-        assert!(!japanese.is_dictionary());
-        assert!(!japanese.is_generated_or_fallback());
-        assert!(!japanese.is_sentence_learning());
-        assert!(!japanese.is_online());
-        assert!(!japanese.takes_online_seat());
-        assert!(!japanese.holds_ai_seat());
     }
 
     /// 插件指令行（14）同样不属于任何谓词：不学习、不坐在线座位。
@@ -1421,8 +1258,7 @@ mod tests {
                 LocalInputMode::Emoji => LocalInputMode::Kaomoji,
                 LocalInputMode::Kaomoji => LocalInputMode::SuperJianpin,
                 LocalInputMode::SuperJianpin => LocalInputMode::TemporaryEnglish,
-                LocalInputMode::TemporaryEnglish => LocalInputMode::TemporaryJapanese,
-                LocalInputMode::TemporaryJapanese => LocalInputMode::Expression,
+                LocalInputMode::TemporaryEnglish => LocalInputMode::Expression,
                 LocalInputMode::Expression => LocalInputMode::Command,
                 LocalInputMode::Command => LocalInputMode::Mention,
                 LocalInputMode::Mention => LocalInputMode::Url,
@@ -1442,7 +1278,7 @@ mod tests {
             names.push(current.name());
             mode = next(current);
         }
-        assert_eq!(names.len(), 15);
+        assert_eq!(names.len(), 14);
         assert!(names.contains(&"url"));
         assert!(names.contains(&"chaizi"));
         assert!(names.contains(&"symbol"));

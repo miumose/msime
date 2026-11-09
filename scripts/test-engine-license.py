@@ -22,7 +22,6 @@ INBOUND = "GPL-3.0-only OR MPL-2.0"
 
 # 编进引擎、保留各自许可证的数据文件（相对 crates/engine/src）→ 它们带进包的 SPDX 标识。
 EMBEDDED = {
-    "korean/hanja.tsv": {"BSD-3-Clause"},
     "local/places.tsv": {"WTFPL"},
     "local/chaizi.tsv": {"CC-BY-3.0", "Unicode-3.0", "Apache-2.0"},
     "local/chaizi-chars.tsv": {"CC-BY-3.0", "Unicode-3.0", "Apache-2.0"},
@@ -33,44 +32,37 @@ EMBEDDED = {
     "lattice/offensive_words.txt": {"MPL-2.0"},
     "lattice/mild_slang_words.txt": {"MPL-2.0"},
     "lattice/offensive_english_words.txt": {"MPL-2.0"},
-    # 聚合统计事实，不带许可证（维护者 2026-10-29 裁定，见 docs/third-party.md）。
-    "nine_key/syllable_frequency.tsv": set(),
 }
 # 改编自第三方代码的源文件 → 它们带进包的 SPDX 标识（本项目的改动是 MPL-2.0）。
 ADAPTED = {
-    "handwriting/model.rs": {"BSD-3-Clause"},
-    "handwriting/features.rs": {"BSD-3-Clause"},
     "lattice/octagram.rs": {"BSD-3-Clause", "BSD-2-Clause"},
     "lattice/cxx_sort.rs": {"Apache-2.0 WITH LLVM-exception"},
 }
 # 只给测试读的数据：目录名或文件名带这些片段的不算编进产品。
 TEST_DATA = ("/testdata/", "_fixture")
 
-# 手工列声明的渠道必须在非注释行写出的许可证文件。Linux 和 Windows 的 MPL-2.0 全文走 collect-notices.py 收集的 rust-crates-NOTICES.txt（见 COLLECTOR），所以那几个渠道只要求 libc++ 的文本。
+# 手工列声明的渠道必须在非注释行写出的许可证文件。Linux 和 Windows 的 MPL-2.0 全文走收集脚本生成的 rust-crates-NOTICES.txt，所以那几个渠道只要求 libc++ 的文本。
 LLVM_LICENCE = "libcxx-Apache-2.0-WITH-LLVM-exception.txt"
-# 引擎编进的 LaTeX 表是 MIT，不带官方短语表包的构建也要带上它的全文；Windows 与网页引擎直接收 plugins/phrase_table/LICENSE。
+# 引擎编进的 LaTeX 表是 MIT，Windows 的声明渠道直接收项目里的全文。
 LATEX_LICENCE = "latex-symbols-MIT.txt"
 CHANNELS = {
-    "platforms/windows/Collect-Notices.ps1": (LLVM_LICENCE, "plugins/phrase_table/LICENSE"),
+    "platforms/windows/Collect-Notices.ps1": (LLVM_LICENCE, f"resources/licenses/{LATEX_LICENCE}"),
     "platforms/windows/tests/tools/collect_notices.ps1": (LLVM_LICENCE,),
     "platforms/windows/Notices.md": (LLVM_LICENCE,),
     "docs/third-party.md": (LLVM_LICENCE, "crates/engine/README.md"),
 }
-COLLECTOR = "platforms/linux/collect-notices.py"
 # 随 crates.io 上的引擎包发布的许可证全文：README 表里「全文」一列指向的文件，逐字节复制自 resources/licenses/。
 PACKAGED_LICENCES = {
-    "libhangul-hanja-BSD-3-Clause.txt",
     "Administrative-divisions-of-China-WTFPL.txt",
     "kfcd-chaizi-CC-BY-3.0.txt",
     "Unicode-License-V3.txt",
     "OpenCC-Apache-2.0.txt",
     "latex-symbols-MIT.txt",
-    "Zinnia-LICENSE.txt",
     "librime-octagram-BSD-3-Clause.txt",
     LLVM_LICENCE,
 }
-# 一定不能进包的路径（相对 crates/engine）：录自 GPL 词库的金样、手写参考输出、自动纠错表的转储，以及读仓库里词库的示例。
-UNPACKAGED = ("tests/golden.rs", "tests/golden/real/example.json", "src/handwriting/testdata/strokes.tsv", "src/pinyin/autocorrect_table_fixture.txt", "examples/query_dictionary.rs")
+# 一定不能进包的路径（相对 crates/engine）：录自 GPL 词库的金样、自动纠错表的转储，以及读仓库里词库的示例。
+UNPACKAGED = ("tests/golden.rs", "tests/golden/real/example.json", "src/pinyin/autocorrect_table_fixture.txt", "examples/query_dictionary.rs")
 INBOUND_DOCS = ("crates/engine/README.md", "crates/path-trust/README.md", ".github/CONTRIBUTING.md", ".github/pull_request_template.md", "README.md")
 failures = []
 
@@ -199,7 +191,8 @@ def main() -> int:
     check("---- LLVM Exceptions to the Apache 2.0 License ----" in llvm and "llvm-project/blob/4a1b95bda0c444798a5240fe924dd127b776d12d/libcxx/LICENSE.TXT" in llvm, f"{LLVM_LICENCE} is not libc++'s LICENSE.TXT with its pinned source")
 
     latex = (ROOT / "resources/licenses" / LATEX_LICENCE).read_text(encoding="utf-8")
-    check(latex.endswith((ROOT / "plugins/phrase_table/LICENSE").read_text(encoding="utf-8")), f"{LATEX_LICENCE} does not end with plugins/phrase_table/LICENSE verbatim")
+    check("MIT License" in latex and "Copyright (c) 2026 Metasequoia IME contributors" in latex, f"{LATEX_LICENCE} lost the project's MIT terms")
+    check("plugins/phrase_table" not in latex, f"{LATEX_LICENCE} still points at the removed phrase-table plugin")
 
     for channel, names in CHANNELS.items():
         lines = live_lines(ROOT / channel)
