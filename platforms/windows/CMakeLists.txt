@@ -1251,6 +1251,10 @@ if(WIN32)
   add_test(NAME windows-watchdog-help COMMAND msime-client-watchdog --help)
   set_tests_properties(windows-watchdog-help PROPERTIES TIMEOUT 5)
   add_executable(msime-client-server src/entrypoints/server_main.cpp)
+  # server_main.cpp 先包含 FloatingToolbarWindow.h 这类会带进 windows.h 的头，之后才包含
+  # 自己定义 NOMINMAX 的头，min/max 宏会漏进后面的 std::max 和 numeric_limits<T>::max()。
+  # 与 msime-windows-server 一样在目标上关掉宏，而不是依赖包含顺序。
+  target_compile_definitions(msime-client-server PRIVATE NOMINMAX)
   target_include_directories(msime-client-server PRIVATE ../../platforms/common)
   # Server 上报的版本号；普通安装包由 Build-Client.ps1 显式传入现代 Windows 版本。
   set(_msime_version_file "${CMAKE_CURRENT_LIST_DIR}/version.txt")
