@@ -4,6 +4,12 @@ name: Windows installer
 # 不签名、不创建 release，只把安装包和 SHA-256 作为 workflow artifact 上传。
 on:
   workflow_dispatch:
+  # 本分支不是默认分支，手动触发不会注册；改动本文件时自动跑一次。只匹配这个路径，
+  # 其他提交不会触发这条重量级流水线。
+  push:
+    branches: [zh-only]
+    paths:
+      - .github/workflows/windows-installer.yml
     inputs:
       edition:
         description: 产品版本
