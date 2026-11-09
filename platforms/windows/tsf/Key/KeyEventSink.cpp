@@ -452,15 +452,6 @@ bool IsCharacterSetInputModeToggle(UINT code, UINT modifiers)
            FanyUtils::ReadConfiguredSwitchLanguageHotkeys().character_set_ctrl_shift_f;
 }
 
-// Ctrl+Shift+J 在中文方案和日语之间切换：开关打开、Server 协商到这一位、本版本同时提供两头时才吃。Engine 自己的英文模式（Ctrl+Shift+E）里 TIP 仍报告中文，这时组合键交给应用，和中文输入法关着时一样。
-bool IsJapaneseInputModeToggle(UINT code, UINT modifiers)
-{
-    return FanyImeProtocol::IsJapaneseToggleShortcut(code, modifiers) && (GetAsyncKeyState(VK_LWIN) & 0x8000) == 0 &&
-           (GetAsyncKeyState(VK_RWIN) & 0x8000) == 0 && msime::windows::scheme::offers_japanese_toggle() &&
-           SupportsJapaneseToggleShortcut() && !Global::DedicatedEnglish.active(GetTickCount64()) &&
-           FanyUtils::ReadConfiguredSwitchLanguageHotkeys().japanese_toggle_ctrl_shift_j;
-}
-
 void PostOwnerMessageWithSyncFallback(HWND window, UINT message, WPARAM wParam = 0, LPARAM lParam = 0)
 {
     if (!window || !IsWindow(window))
