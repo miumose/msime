@@ -1,4 +1,4 @@
-// Server 的会话接入生命周期核心以后，宿主库调用的先后顺序。测试自己实现 msime_client.h 里 Server 用到的函数，记下每一次调用，在 FocusedSession 的真实按键路径上逐条核对：会话一建好就选择加入 FEEDBACK 和 HOST_HOLDS_PIECES；字段属性变了先报，再报按键，然后才把键交给引擎，每次 focus(true) 之前都原样报一次属性（值没变也报，脚本运行时据此确认属性），激活时也先报属性再 set_active（全屏前台的判断由测试注入，好让属性在两次调用之间变化）；交给应用的键带 PASSTHROUGH、不派发；TIP 自己写进文档的上屏（韩文、整句改字、本地回车）前后打开 COMMIT_OBSERVE_ONLY；以词定字的回退和 Ctrl+Enter 的译文这些 Server 合成的上屏用命令 19 丢弃组字，生命周期里记 HostCommit 而不是 Cancel；上屏特效只在上屏真的进了文档时发布，部分选词暂存的那一段和宿主合成的上屏都不发布；旧的 key_sound、commit_sound、music_set_active 和 typing_effect 一次都不再调用，同一次上屏不会在宿主这边再响一遍。最后经 InputState 核对 TIP 报的属性记在客户端上，词库维护后重建的会话也拿得到。
+// Server 的会话接入生命周期核心以后，宿主库调用的先后顺序。测试自己实现 msime_client.h 里 Server 用到的函数，记下每一次调用，在 FocusedSession 的真实按键路径上逐条核对：会话一建好就选择加入 FEEDBACK 和 HOST_HOLDS_PIECES；字段属性变了先报，再报按键，然后才把键交给引擎，每次 focus(true) 之前都原样报一次属性（值没变也报，脚本运行时据此确认属性），激活时也先报属性再 set_active（全屏前台的判断由测试注入，好让属性在两次调用之间变化）；交给应用的键带 PASSTHROUGH、不派发；TIP 自己写进文档的上屏（整句改字、本地回车）前后打开 COMMIT_OBSERVE_ONLY；以词定字的回退和 Ctrl+Enter 的译文这些 Server 合成的上屏用命令 19 丢弃组字，生命周期里记 HostCommit 而不是 Cancel；上屏特效只在上屏真的进了文档时发布，部分选词暂存的那一段和宿主合成的上屏都不发布；旧的 key_sound、commit_sound、music_set_active 和 typing_effect 一次都不再调用，同一次上屏不会在宿主这边再响一遍。最后经 InputState 核对 TIP 报的属性记在客户端上，词库维护后重建的会话也拿得到。
 #include "FocusedSession.h"
 #include "InputQueue.h"
 #include "LifecyclePolicy.h"
@@ -181,14 +181,8 @@ char *msime_client_focus(uint64_t, bool focused) {
 }
 char *msime_client_character(uint64_t, uint8_t ascii, bool) {
   record("character", ascii);
-  // 韩文这样的方案里，开始新音节的字母带着上一个音节上屏（TIP 已经从自己的会话把它写进了文档）。
-  nlohmann::json commit = nullptr;
-  if (fake_scheme == 4 && !fake_editing.empty()) {
-    commit = fake_editing;
-    fake_editing.clear();
-  }
   fake_editing.push_back(static_cast<char>(ascii));
-  return transition(commit);
+  return transition(nullptr);
 }
 char *msime_client_command(uint64_t, uint32_t command) {
   record("command", command);
@@ -287,12 +281,9 @@ char *msime_client_simplified_to_traditional(const uint8_t *, size_t) { return n
 
 int main() {
   try {
-    std::vector<std::string> recorded;
     {
       FocusGate gate;
       FocusedSession focused(gate, client, R"({"preferences":{}})");
-      focused.set_typing_statistics_sink(
-          [&](const std::string &text, TypingSource) { recorded.push_back(text); });
       focused.set_fullscreen_check([] { return fake_fullscreen; });
       auto &effects = TypingEffectSignal::instance();
       // 会话一建好就选择加入，不等第一次激活。
@@ -335,7 +326,6 @@ int main() {
       REQUIRE(focused.configured_key(lease, key(0x20, u' ', request), TsfPreeditStyle::Pinyin, {}).has_value());
       REQUIRE(focused.confirm(lease, request++));
       EXPECT_TRACE({"key:1", "command:" + std::to_string(MSIME_COMMIT_CANDIDATE)});
-      REQUIRE(recorded == std::vector<std::string>{"啊"});
       REQUIRE(effects.take() == typing_effect_mark_commit((1u << 17) | 3u));
 
       // 部分选词：选中的一段留在 Runtime 的前缀里、没进文档，不画上屏特效（那次回复里的特效为 0 时还会把连击徽标清零），候选窗只拿到按键的特效；整段送出的那次才画。
@@ -352,7 +342,6 @@ int main() {
       REQUIRE(focused.confirm(lease, request++));
       EXPECT_TRACE({"key:1", "command:" + std::to_string(MSIME_COMMIT_CANDIDATE)});
       REQUIRE(effects.take() == typing_effect_mark_commit((1u << 17) | 3u));
-      REQUIRE(recorded == std::vector<std::string>({"啊", "啊啊"}));
 
       // 按住不放的自动重复带 MSIME_KEY_REPEAT。
       auto repeated = key('B', u'b', request);
@@ -390,21 +379,6 @@ int main() {
       REQUIRE(!focused.passthrough_key(token + 1, 3));
       EXPECT_TRACE({});
 
-      // 韩文：TIP 已经从自己的宿主会话把上一个音节写进文档，这次派发的上屏只能观察；派发前打开、派发后关掉，上屏只在 Server 这一个会话里出一次声。
-      fake_scheme = 4;
-      REQUIRE(focused.configured_key(lease, key('R', u'r', request), TsfPreeditStyle::Pinyin, {}).has_value());
-      REQUIRE(focused.confirm(lease, request++));
-      EXPECT_TRACE({"key:0", "set_lifecycle:" + std::to_string(lifecycle_flags(true)), "character:114",
-                    "set_lifecycle:" + std::to_string(lifecycle_flags())});
-      REQUIRE(focused.configured_key(lease, key('K', u'k', request), TsfPreeditStyle::Pinyin, {}).has_value());
-      REQUIRE(focused.confirm(lease, request++));
-      EXPECT_TRACE({"key:0", "set_lifecycle:" + std::to_string(lifecycle_flags(true)), "character:107",
-                    "set_lifecycle:" + std::to_string(lifecycle_flags())});
-      REQUIRE(recorded == std::vector<std::string>({"啊", "啊啊", "啊", "hello", "r"}));
-      fake_scheme = 0;
-      REQUIRE(focused.cancel_composition(lease));
-      calls.clear();
-
       // 整句改字时同样只能观察。
       REQUIRE(focused.configured_key(lease, key('C', u'c', request), TsfPreeditStyle::Pinyin, {}).has_value());
       REQUIRE(focused.confirm(lease, request++));
@@ -427,7 +401,6 @@ int main() {
       EXPECT_TRACE({"key:2", "set_lifecycle:" + std::to_string(lifecycle_flags(true)),
                     "command:" + std::to_string(MSIME_COMMIT_RAW),
                     "set_lifecycle:" + std::to_string(lifecycle_flags())});
-      REQUIRE(recorded.back() == "g");
 
       // 切到英文再切回来：切回来的 focus(true) 之前同样原样再报一次属性。
       REQUIRE(focused.set_input_enabled(lease, false));
@@ -448,7 +421,6 @@ int main() {
                     "command:" + std::to_string(MSIME_CANCEL)});
       REQUIRE(effects.take() == typing_effect_mark_commit((1u << 17) | 3u));
       REQUIRE(focused.confirm_ui(lease, whole->source.transition.at("view").at("generation").get<uint64_t>()));
-      REQUIRE(recorded.back() == "啊");
       fake_source = 0;
       calls.clear();
 
