@@ -120,6 +120,7 @@ jobs:
             windows-installer-native-
 
       - name: Install native dependencies
+        id: native-install
         if: steps.native-deps.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
@@ -140,7 +141,17 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed for $triplet" }
           }
 
+      # 失败时 actions/cache 的收尾保存会被跳过，后面每一步都得重新装一遍依赖。
+      # 装完就显式存一次，后续调试运行可以直接命中。
+      - name: Save native dependencies
+        if: always() && steps.native-deps.outputs.cache-hit != 'true' && steps.native-install.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/msime-deps
+          key: windows-installer-native-${{ hashFiles('platforms/windows/vcpkg.json') }}
+
       - name: Cache desktop dictionaries
+        id: desktop-resources
         uses: actions/cache@v4
         with:
           path: target/desktop-resources
@@ -149,6 +160,7 @@ jobs:
             windows-installer-resources-${{ inputs.edition || 'pinyin' }}-
 
       - name: Fetch desktop dictionaries
+        id: fetch-resources
         shell: pwsh
         env:
           EDITION: ${{ inputs.edition || 'pinyin' }}
@@ -156,6 +168,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python scripts/fetch_desktop_resources.py --edition $env:EDITION --out target/desktop-resources
           if ($LASTEXITCODE -ne 0) { throw 'desktop dictionary download failed' }
+
+      - name: Save desktop dictionaries
+        if: always() && steps.desktop-resources.outputs.cache-hit != 'true' && steps.fetch-resources.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: target/desktop-resources
+          key: windows-installer-resources-${{ inputs.edition || 'pinyin' }}-${{ hashFiles('resources/desktop-dictionary.lock.json', 'resources/editions/*.lock.json', 'scripts/fetch_desktop_resources.py') }}
 
       - name: Build client
         shell: pwsh
