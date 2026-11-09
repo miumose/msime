@@ -4,12 +4,6 @@ name: Windows installer
 # 不签名、不创建 release，只把安装包和 SHA-256 作为 workflow artifact 上传。
 on:
   workflow_dispatch:
-  # 本分支不是默认分支，手动触发不会注册；改动本文件时自动跑一次。只匹配这个路径，
-  # 其他提交不会触发这条重量级流水线。
-  push:
-    branches: [zh-only]
-    paths:
-      - .github/workflows/windows-installer.yml
     inputs:
       edition:
         description: 产品版本
@@ -23,12 +17,18 @@ on:
         description: 版本号（留空取 platforms/windows/version.txt）
         required: false
         type: string
+  # 本分支不是默认分支，手动触发不会注册；改动本文件时自动跑一次。只匹配这个路径，
+  # 其他提交不会触发这条重量级流水线。
+  push:
+    branches: [zh-only]
+    paths:
+      - .github/workflows/windows-installer.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-installer-${{ github.ref }}-${{ inputs.edition }}
+  group: windows-installer-${{ github.ref }}-${{ inputs.edition || 'pinyin' }}
   cancel-in-progress: false
 
 env:
@@ -38,7 +38,7 @@ env:
 
 jobs:
   installer:
-    name: Windows installer (${{ inputs.edition }}, unsigned)
+    name: Windows installer (${{ inputs.edition || 'pinyin' }}, unsigned)
     runs-on: windows-2025
     # Rust 三架构、三次原生构建和 WinUI 设置冷构建串行跑，首次运行可能接近两小时。
     timeout-minutes: 330
@@ -52,7 +52,7 @@ jobs:
         id: version
         shell: pwsh
         env:
-          REQUESTED: ${{ inputs.version }}
+          REQUESTED: ${{ inputs.version || '' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $v = if ($env:REQUESTED) { $env:REQUESTED.Trim() } else { (Get-Content platforms/windows/version.txt -TotalCount 1).Trim() }
@@ -135,14 +135,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/desktop-resources
-          key: windows-installer-resources-${{ inputs.edition }}-${{ hashFiles('resources/desktop-dictionary.lock.json', 'resources/editions/*.lock.json', 'scripts/fetch_desktop_resources.py') }}
+          key: windows-installer-resources-${{ inputs.edition || 'pinyin' }}-${{ hashFiles('resources/desktop-dictionary.lock.json', 'resources/editions/*.lock.json', 'scripts/fetch_desktop_resources.py') }}
           restore-keys: |
-            windows-installer-resources-${{ inputs.edition }}-
+            windows-installer-resources-${{ inputs.edition || 'pinyin' }}-
 
       - name: Fetch desktop dictionaries
         shell: pwsh
         env:
-          EDITION: ${{ inputs.edition }}
+          EDITION: ${{ inputs.edition || 'pinyin' }}
         run: |
           $ErrorActionPreference = 'Stop'
           python scripts/fetch_desktop_resources.py --edition $env:EDITION --out target/desktop-resources
@@ -151,7 +151,7 @@ jobs:
       - name: Build client
         shell: pwsh
         env:
-          EDITION: ${{ inputs.edition }}
+          EDITION: ${{ inputs.edition || 'pinyin' }}
           VERSION: ${{ steps.version.outputs.value }}
           X64_DEPS: ${{ runner.temp }}\msime-deps\x64-windows\x64-windows
           X86_DEPS: ${{ runner.temp }}\msime-deps\x86-windows\x86-windows
@@ -167,7 +167,7 @@ jobs:
       - name: Collect third-party notices
         shell: pwsh
         env:
-          EDITION: ${{ inputs.edition }}
+          EDITION: ${{ inputs.edition || 'pinyin' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $x64 = Join-Path $env:RUNNER_TEMP 'msime-deps/x64-windows/x64-windows'
@@ -177,7 +177,7 @@ jobs:
       - name: Stage package files
         shell: pwsh
         env:
-          EDITION: ${{ inputs.edition }}
+          EDITION: ${{ inputs.edition || 'pinyin' }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -190,7 +190,7 @@ jobs:
       - name: Compile installer
         shell: pwsh
         env:
-          EDITION: ${{ inputs.edition }}
+          EDITION: ${{ inputs.edition || 'pinyin' }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -224,6 +224,6 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: msime-installer-${{ inputs.edition }}-${{ steps.version.outputs.value }}
+          name: msime-installer-${{ inputs.edition || 'pinyin' }}-${{ steps.version.outputs.value }}
           path: dist/
           if-no-files-found: error
