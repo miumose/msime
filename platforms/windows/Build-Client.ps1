@@ -47,8 +47,7 @@ $hostDll = [string]$editionEntry[0].platforms.windows.host_dll
 $buildRoot = Join-Path $RepoRoot "target/windows-$Edition"
 foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
                          'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
-                         'platforms/windows/settings/MSIME.Settings.vcxproj',
-                         )) {
+                         'platforms/windows/settings/MSIME.Settings.vcxproj')) {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relative) -PathType Leaf)) {
         throw "Missing Client build source: $relative"
     }

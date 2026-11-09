@@ -17,12 +17,18 @@ on:
         description: 版本号（留空取 platforms/windows/version.txt）
         required: false
         type: string
-  # 本分支不是默认分支，手动触发不会注册；改动本文件时自动跑一次。只匹配这个路径，
+  # 本分支不是默认分支，手动触发不会注册；安装包构建输入变化时自动跑一次。
   # 其他提交不会触发这条重量级流水线。
   push:
     branches: [zh-only]
     paths:
       - .github/workflows/windows-installer.yml
+      - platforms/windows/Build-Client.ps1
+      - platforms/windows/Build-RustOutputs.ps1
+      - platforms/windows/Collect-Notices.ps1
+      - platforms/windows/installer/**
+      - '!platforms/windows/installer/**/*.md'
+      - scripts/fetch_desktop_resources.py
 
 permissions:
   contents: read
