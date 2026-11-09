@@ -15,13 +15,6 @@ int main(int argc, char **argv) {
     assert(!msime_client_key_dispatch_allows_fallback(MSIME_CLIENT_KEY_DELIVERY_AMBIGUOUS));
     assert(argc == 2);
     assert(msime_client_abi_version() == 3);
-    char *themes = msime_client_theme_catalog();
-    assert(themes && strstr(themes, "\"ok\":true") && strstr(themes, "\"default\":\"system\""));
-    msime_client_string_free(themes);
-    const char *theme_request = "{\"global_theme\":\"night\",\"dark\":true,\"layout\":\"vertical\"}";
-    char *theme = msime_client_resolve_theme((const uint8_t *)theme_request, strlen(theme_request));
-    assert(theme && strstr(theme, "\"ok\":true") && strstr(theme, "\"source\":\"builtin\""));
-    msime_client_string_free(theme);
     msime_client_key_event event = {{1, 2, 3}, 0x41, 30, 0x0f, 'a', false};
     assert(msime_client_key_event_valid(&event));
     event.lease.token = 0;
@@ -39,10 +32,6 @@ int main(int argc, char **argv) {
     uint64_t handle = strtoull(field + strlen("\"session\":"), NULL, 10);
     msime_client_string_free(created);
     success(msime_client_focus(handle, true));
-    char *nine_key = msime_client_set_nine_key_mode(handle, true);
-    assert(nine_key && strstr(nine_key, "\"nine_key\":true"));
-    msime_client_string_free(nine_key);
-    success(msime_client_set_nine_key_mode(handle, false));
     success(msime_client_character(handle, 'U', true));
     const char *code = "4e2d";
     for (size_t i = 0; i < strlen(code); ++i) success(msime_client_character(handle, (uint8_t)code[i], false));

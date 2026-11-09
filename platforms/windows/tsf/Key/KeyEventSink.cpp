@@ -11,12 +11,6 @@
 #include <cwctype>
 #include <string>
 #include "Ipc.h"
-#include "PassthroughStatistics.h"
-#include "PassthroughStatisticsQueue.h"
-#include "KeyPressStatistics.h"
-#include "KeyPressStatisticsQueue.h"
-#include "PassthroughKeySoundQueue.h"
-#include "../../common/KeySoundClass.h"
 #include "FanyDefines.h"
 #include "AltGrKeyPolicy.h"
 #include "FullwidthChordPolicy.h"
@@ -2301,141 +2295,6 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
     return false;
 }
 
-//+---------------------------------------------------------------------------
-//
-// _NotePassthroughStatistics
-//
-// Counts one printable character that this tip hands back to the application. The commit paths never see these keys - the host inserts them - so this is the only capture point for half-width digits, the symbols outside the punctuation table and English-mode letters. Observation only: the eaten result, the deferred queue and the edit path stay untouched, and every failure mode is a dropped count.
-//----------------------------------------------------------------------------
-
-void CMetasequoiaIME::_NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled)
-{
-    // 设置应用面板注入的文字由它自己按来源计数（PassthroughStatistics.h）。
-    if (IsPanelTextSendInput(static_cast<std::uintptr_t>(GetMessageExtraInfo())))
-    {
-        return;
-    }
-    const LONG messageTime = GetMessageTime();
-    if (virtualKey != 0 && virtualKey == _passthroughStatsVirtualKey && messageTime == _passthroughStatsMessageTime)
-    {
-        // The system can query the same key event more than once; only the first pass counts. The marker is consumed here: the probes for one event arrive back to back, so anything later is a genuine second press that GetMessageTime cannot separate inside the same tick.
-        _passthroughStatsVirtualKey = 0;
-        return;
-    }
-
-    if (wch == L'\0')
-    {
-        // The keyboard-closed early return in _IsKeyEaten leaves its out-char blank even though the key reaches the application; widen it from the layout here. Keys that genuinely produce no character keep the zero and are dropped by the filter.
-        wch = ConvertVKey(virtualKey);
-    }
-
-    // The same physical-state read _IsKeyEaten uses for application-owned combinations.
-    const UINT modifiers = CaptureIpcModifiers();
-    const bool ctrlDown = (modifiers & 0b00000010u) != 0;
-    const bool altDown = (modifiers & 0b00000100u) != 0;
-    const bool winDown = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
-    // A non-zero out-char from _IsKeyEaten passed that function's own keyboard-disabled check, so the compartment query is only needed when the caller could not prove the keyboard was live.
-    const bool keyboardDisabled = !keyboardKnownEnabled && _IsKeyboardDisabled() != FALSE;
-    if (!ShouldCountPassthroughChar(wch, keyboardDisabled, ctrlDown, altDown, winDown))
-    {
-        return;
-    }
-
-    BOOL isOpen = FALSE;
-    CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
-    CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
-
-    _passthroughStatsVirtualKey = virtualKey;
-    _passthroughStatsMessageTime = messageTime;
-    QueuePassthroughStatistics(wch, isOpen == FALSE);
-}
-
-//+---------------------------------------------------------------------------
-//
-// _NoteKeyPressStatistics
-//
-// Counts one physical key press for the key heatmap: every key while this tip is active, eaten or passed through, Shift and hotkeys included. Only the key's id goes into the count. It runs ahead of every early return in OnTestKeyDown and again in OnKeyDown, for hosts that skip the test probe, so each press is seen at least once and the de-duplication keeps it to once. Observation only: nothing here changes how the key is handled.
-//----------------------------------------------------------------------------
-
-void CMetasequoiaIME::_NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam)
-{
-    const wchar_t *keyId = KeyPressIdFromKeyDown(static_cast<std::uintptr_t>(wParam), static_cast<std::uintptr_t>(lParam));
-    if (keyId == nullptr)
-    {
-        return;
-    }
-    // The Test and Key probes of one press share its scan code and message time. Unlike the passthrough marker this one is not consumed, because a press can be probed more than twice; a genuine second press of the same key needs a key-up in between and so a later message.
-    const UINT physicalKey = KeyPressPhysicalKey(static_cast<std::uintptr_t>(lParam));
-    const LONG messageTime = GetMessageTime();
-    if (physicalKey == _keyPressStatsKey && messageTime == _keyPressStatsMessageTime)
-    {
-        return;
-    }
-    _keyPressStatsKey = physicalKey;
-    _keyPressStatsMessageTime = messageTime;
-    if (!ShouldCountKeyPress(keyId, _IsKeyboardDisabled() != FALSE, _IsSecureMode() != FALSE))
-    {
-        return;
-    }
-    QueueKeyPressStatistics(keyId);
-}
-
-//+---------------------------------------------------------------------------
-//
-// _NotePassthroughKeySound
-//
-// 交给应用的一次按下也要出按键音、计入打字特效的连击，和 macOS 每个按键都出声一样：没有组字时的空格、回车、退格、数字和方向键都不经过 Server 的按键路径，只能在这里报。只是观察：按键吃不吃、延迟队列和编辑路径都不受影响，入队之后的管道读写在线程池上，不占按键路径的时间。哪些键出声由 passthrough_key_sound_class 决定。
-//----------------------------------------------------------------------------
-
-void CMetasequoiaIME::_NotePassthroughKeySound(WPARAM wParam, LPARAM lParam, WCHAR wch)
-{
-    // 按键音和打字特效都关着时 Server 不回 "OK"，队列停发；这时连扫描码都不必记。
-    if (PassthroughKeySoundSuppressed())
-    {
-        return;
-    }
-    // 同一次按下的 Test 探测可能来不止一次，扫描码和消息时间都相同；真正的第二次按下中间隔着一次抬起，消息时间不同。
-    const UINT physicalKey = KeyPressPhysicalKey(static_cast<std::uintptr_t>(lParam));
-    const LONG messageTime = GetMessageTime();
-    if (physicalKey == _passthroughSoundKey && messageTime == _passthroughSoundMessageTime)
-    {
-        return;
-    }
-    _passthroughSoundKey = physicalKey;
-    _passthroughSoundMessageTime = messageTime;
-    const uint64_t focusToken = GetNamedpipeFocusToken();
-    if (focusToken == 0)
-    {
-        return;
-    }
-    msime::windows::PassthroughKeyState key;
-    key.virtual_key = static_cast<uint32_t>(wParam);
-    key.auto_repeat = IsAutoRepeat(lParam);
-    const UINT modifiers = CaptureIpcModifiers();
-    // AltGr 读作 Ctrl+Alt：它按出字符时是打字，照样出声、计入连击，和 macOS 的 Option 一样。这个键已经交给应用，不会选候选，所以不用 Global::CharacterModifiers 给数字键留的例外。
-    const bool altGrCharacter = Global::IsAltGrCharacter(modifiers, wch);
-    key.ctrl = !altGrCharacter && (modifiers & 0b00000010u) != 0;
-    key.alt = !altGrCharacter && (modifiers & 0b00000100u) != 0;
-    key.win = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
-    key.injected = IsPanelTextSendInput(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
-    // 先用不需要查询 TSF 的部分判断，修饰键、快捷键和自动重复不必再读隔间。
-    key.keyboard_open = true;
-    if (!msime::windows::passthrough_key_sound_class(key))
-    {
-        return;
-    }
-    BOOL isOpen = FALSE;
-    CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
-    CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
-    key.keyboard_open = isOpen != FALSE;
-    key.keyboard_disabled = _IsKeyboardDisabled() != FALSE;
-    key.secure = _IsSecureMode() != FALSE;
-    if (const auto keyClass = msime::windows::passthrough_key_sound_class(key))
-    {
-        QueuePassthroughKeySound(GetNamedpipeClientId(), focusToken, *keyClass);
-    }
-}
-
 namespace
 {
 // 客户端进程是否以管理员身份运行。进程的令牌在它的一生里不会变，查一次就够；查不到时当作提权（FanyImeFieldTraits::ProcessElevated）。这个 DLL 用 /Zc:threadSafeInit- 编译，函数内的静态变量没有线程安全的初始化，所以缓存放在常量初始化的原子量里（0 没查过，1 没有提权，2 提权）：几个线程同时第一次查，各自算出同一个值，不会有数据竞争。
@@ -2516,7 +2375,6 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
         return S_OK;
     }
     // Ahead of the backspace-hold, Shift and hotkey returns below, each of which would otherwise hide a real press.
-    _NoteKeyPressStatistics(wParam, lParam);
     // 只有第一次按下切换状态，长按产生的重复消息不重新武装轻点。
     if (wParam == VK_CAPITAL && !IsAutoRepeat(lParam))
     {
@@ -2568,8 +2426,6 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
             deferredCode = VKeyFromVKPacketAndWchar(static_cast<UINT>(wParam), deferredWch);
             _NoteKeyForSmartPunctuation(deferredCode, deferredWch, false);
             // _ClassifyDeferredKeyDown is not reached on this exit and ConvertVKey fills the char without checking the keyboard state.
-            _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
-            _NotePassthroughKeySound(wParam, lParam, deferredWch);
             *pIsEaten = FALSE;
             return S_OK;
         }
@@ -2583,8 +2439,6 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
         if (!*pIsEaten)
         {
             // The deferred classifier fills its out-char before its own keyboard-disabled check, and not every exit runs that check, so the char proves nothing about the keyboard state.
-            _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
-            _NotePassthroughKeySound(wParam, lParam, deferredWch);
         }
         return S_OK;
     }
@@ -2609,8 +2463,6 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
     if (!*pIsEaten)
     {
         // A half-width digit, a symbol outside the tables or an English-mode letter lands here: the tip let it through, so the host inserts it outside every commit path.
-        _NotePassthroughStatistics(static_cast<UINT>(wParam), wch, wch != L'\0');
-        _NotePassthroughKeySound(wParam, lParam, wch);
     }
 
     DebugTsfIssue47(L"test-keydown-classified", FANY_IME_NO_REQUEST_ID, code, wch, KeystrokeState.Category,
@@ -3299,7 +3151,6 @@ STDAPI CMetasequoiaIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lP
         return S_OK;
     }
     // Usually a repeat of the OnTestKeyDown probe and dropped as one; it counts only for a host that calls OnKeyDown without testing first.
-    _NoteKeyPressStatistics(wParam, lParam);
     PerfTimer onKeyDownTimer;
     // 和 OnTestKeyDown 同一条规则；有的宿主不先测试就直接交来按键。
     switch (msime::tsf::PredictionKey(_IsPredictionVisible(), LOWORD(wParam), CaptureIpcModifiers(), _PredictionRows()))

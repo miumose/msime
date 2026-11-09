@@ -58,7 +58,7 @@ public:
   }
   void set_scale(double scale) { scale_ = scale; }
   void set_font_size(int size) { font_size_ = size; }
-  void set_items(std::array<bool, 6> items) { layout_.items = items; }
+  void set_items(std::array<bool, 4> items) { layout_.items = items; }
   // UI-thread only; refresh must remeasure even when input mode is unchanged.
   void set_settings(const FloatingToolbarSettings &settings) {
     if (!settings.valid()) return;
@@ -91,22 +91,17 @@ public:
   void set_character_set_reader(std::function<std::optional<bool>()> reader) {
     character_set_reader_ = std::move(reader);
   }
-  // 设置窗口和面板宿主（缺省是共享应用 MSIME.exe，MSIME_WINDOWS_PANEL_HOST=native 时是 msime-client-panels.exe，见 ShellSurfaces.h）各自在不在 Server 旁边。设置按钮要前者，手写按钮要后者；缺了的按钮画成不可用，与托盘对应的行一样，不接受一次什么都不做的点击。表情和屏幕键盘没有面板宿主时打开系统自带的面板，所以不受这两个开关影响。
-  void set_shell_available(bool settings, bool panels) {
-    if (settings_available_ == settings && panels_available_ == panels)
+  // 设置窗口在不在 Server 旁边。设置按钮要它；缺了时按钮画成不可用，与托盘对应的行一样，不接受一次什么都不做的点击。
+  void set_shell_available(bool settings) {
+    if (settings_available_ == settings)
       return;
     settings_available_ = settings;
-    panels_available_ = panels;
     if (window_)
       InvalidateRect(window_, nullptr, FALSE);
   }
   void set_settings_action(Action action) { settings_action_ = std::move(action); }
   void set_character_set_action(Action action) { character_set_action_ = std::move(action); }
-  void set_emoji_action(Action action) { emoji_action_ = std::move(action); }
-  void set_keyboard_action(Action action) { keyboard_action_ = std::move(action); }
   void set_hide_action(Action action) { hide_action_ = std::move(action); }
-  void set_handwriting_action(Action action) { handwriting_action_ = std::move(action); }
-  void set_voice_action(Action action) { voice_action_ = std::move(action); }
   // 切换输入方案按钮：在按钮旁边弹出方案菜单。
   void set_input_scheme_action(MenuAction action) { input_scheme_action_ = std::move(action); }
   // 在工具栏卡片上点右键：弹出实用菜单（设置、检查更新、帮助、隐藏工具栏等）。
@@ -171,11 +166,7 @@ private:
   Click click_;
   Action settings_action_;
   Action character_set_action_;
-  Action emoji_action_;
-  Action keyboard_action_;
   Action hide_action_;
-  Action handwriting_action_;
-  Action voice_action_;
   MenuAction input_scheme_action_;
   MenuAction context_menu_action_;
   Action activity_action_;
@@ -204,7 +195,6 @@ private:
   // 这次移动循环开始时窗口的左上角；松手时和它比，动了才算用户拖到了新位置（floating_toolbar_drag_end）。
   std::optional<POINT> move_start_;
   bool settings_available_ = true;
-  bool panels_available_ = true;
   std::function<bool()> active_reader_;
   std::function<std::optional<bool>()> character_set_reader_;
   bool failed_ = false;

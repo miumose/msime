@@ -71,7 +71,8 @@ inline nlohmann::json candidate_appearance(const std::filesystem::path &state,
 // scale outside 0.75..1.5 or a font size outside 16..28 throws on the launch
 // path - so a value that would not survive is left out rather than copied
 // through. The items object is all-or-nothing because PreviewConfig requires
-// exactly six keys, so a partial block would be refused outright.
+// exactly four keys, so a partial block would be refused outright. 表情、屏幕键盘、
+// 手写和语音按钮已随对应功能移除，不再从偏好里读取。
 inline void apply_floating_toolbar(nlohmann::json &document,
                                    const nlohmann::json &preferences) {
   if (!preferences.contains("floating_toolbar") ||
@@ -95,12 +96,11 @@ inline void apply_floating_toolbar(nlohmann::json &document,
       document["floating_toolbar_font_size"] = static_cast<int>(size);
   }
   static constexpr const char *names[] = {"character_set", "punctuation",
-                                          "fullwidth",     "emoji",
-                                          "screen_keyboard", "settings"};
+                                          "fullwidth",     "settings"};
   nlohmann::json items = nlohmann::json::object();
   for (const char *name : names) {
     if (!toolbar.contains(name) || !toolbar.at(name).is_boolean())
-      return; // Six or none.
+      return; // Four or none.
     items[name] = toolbar.at(name).get<bool>();
   }
   document["floating_toolbar_items"] = items;

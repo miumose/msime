@@ -3,13 +3,12 @@
 #include <cstddef>
 #include <string_view>
 
-// The page model of the native Windows settings window (main.cpp): which pages exist, in which order and group of the shared sidebar, which of them this process draws, and which it hands to the shared desktop app (MSIME.exe). Kept free of Windows and WinRT headers so a host unit test can check it against the route vocabulary of ShellSurfaces.h. Labels live beside the controls in main.cpp; this header stays ASCII.
+// 精简后的 Windows 设置窗口页面表：只保留拼音输入需要的输入、快捷键、候选窗口、悬浮工具栏和关于。
+// 主题皮肤、账号同步、社区、插件、剪贴板、统计、AI、词库、语音、屏幕键盘和诊断页面已随对应功能移除。
 namespace msime::settings {
 
-// Who serves a page. Native pages are drawn by this window. Shell pages belong to the shared desktop app and are opened there on the matching route instead of being rewritten here; since 账号与同步 became native there are none, and every setting is changed in this window.
 enum class PageHost { Native, Shell };
 
-// A surface of the shared desktop app, in the two-field form ShellSurfaceRequest carries: a settings category travels as `page` and a panel as `panel`, never both.
 struct ShellTarget {
   std::string_view panel;
   std::string_view page;
@@ -22,44 +21,20 @@ struct Page {
   ShellTarget shell;
 };
 
-inline constexpr std::size_t page_group_count = 6;
+inline constexpr std::size_t page_group_count = 3;
 
-// 侧栏顺序与共享设置 UI 的 `settingsNavGroups` 一致：打字、输入方式、外观、工具、数据、支持。侧栏与 macOS 一样平铺这些页面、不显示组名，组只决定顺序。桌面不列 `desktopMergedPages` 的页面；手写并进屏幕键盘，提供手写的版本叫「键盘与手写」。
-inline constexpr std::array<Page, 16> pages{{
+inline constexpr std::array<Page, 5> pages{{
     {"typing", 0, PageHost::Native, {}},
-    {"lexicon", 0, PageHost::Native, {}},
     {"shortcuts", 0, PageHost::Native, {}},
-    {"expression", 0, PageHost::Native, {}},
-    {"voice", 1, PageHost::Native, {}},
-    {"osk", 1, PageHost::Native, {}},
-    {"themes", 2, PageHost::Native, {}},
-    {"candidate", 2, PageHost::Native, {}},
-    {"toolbar", 2, PageHost::Native, {}},
-    {"clip", 3, PageHost::Native, {}},
-    {"ai", 3, PageHost::Native, {}},
-    {"plugins", 3, PageHost::Native, {}},
-    {"stats", 4, PageHost::Native, {}},
-    {"account", 4, PageHost::Native, {}},
-    {"dev", 5, PageHost::Native, {}},
-    {"about", 5, PageHost::Native, {}},
+    {"candidate", 1, PageHost::Native, {}},
+    {"toolbar", 1, PageHost::Native, {}},
+    {"about", 2, PageHost::Native, {}},
 }};
 
 inline constexpr std::string_view default_page = "typing";
 
-// 原生页面自己不绘制、需要跳转到共享应用的界面，都是输入工具的面板而不是设置：云词库、云剪贴板和背单词面板，以及屏幕键盘、语音输入和手写面板本身。社区皮肤和社区插件是「主题」「插件」页自己的标签，社区词库与回复模板由「账号与同步」页「我的内容」在本窗口里打开，都不在这里。
 namespace shell_links {
-// The cloud dictionary is a panel of the shared app on every desktop, opened from the lexicon page.
-inline constexpr ShellTarget cloud_dictionary{"cloud-dictionary", ""};
-// The cloud clipboard is a panel of the shared app as well, opened from the 剪贴板 page.
-inline constexpr ShellTarget cloud_clipboard{"cloud-clipboard", ""};
-// The voice panel, from the 语音输入 page's 语音面板 group. The tray's 语音 row does not open it: the Server toggles its own native voice input instead.
-inline constexpr ShellTarget voice_panel{"voice", ""};
-inline constexpr ShellTarget keyboard_panel{"keyboard", ""};
-inline constexpr ShellTarget handwriting_panel{"handwriting", ""};
-// 背单词面板，词库页背单词子页的「开始复习」打开它；复习在面板里进行，设置里只管理词书。
-inline constexpr ShellTarget vocabulary_panel{"vocabulary", ""};
-inline constexpr std::array<ShellTarget, 6> all{{voice_panel, keyboard_panel, handwriting_panel,
-                                                 cloud_dictionary, cloud_clipboard, vocabulary_panel}};
+inline constexpr std::array<ShellTarget, 0> all{};
 } // namespace shell_links
 
 struct RouteAlias {
@@ -67,28 +42,12 @@ struct RouteAlias {
   std::string_view page;
 };
 
-// 共享路由词汇表（`client-core` 的 `host_surface::SettingsCategory`）认识的每个设置类别，映射到现在承载它的页面。每个 id 保持它在其他所有宿主上的含义：`appearance` 是候选窗口页，`skin` 是主题页。托盘会打开 `skin`、`dictionary` 和 `about`，其他桌面启动入口也用同样的名字。本窗口没有单独的社区页，社区皮肤是主题页的一个标签，所以 `community` 打开主题页；AI 对话是 AI 辅助的子页（Windows 不提供，见 README），`chat` 打开 AI 辅助。帮助与反馈和共享桌面侧栏一样并进了「关于」（`desktopMergedPages`），托盘和工具栏菜单的「帮助」「反馈」（`help`、`feedback`）都打开「关于」。
-inline constexpr std::array<RouteAlias, 23> route_aliases{{
-    {"account", "account"},
-    {"chat", "ai"},
-    {"community", "themes"},
+// 仅保留仍存在的页面和它们的共享路由别名。已移除功能的旧路由落回默认页。
+inline constexpr std::array<RouteAlias, 7> route_aliases{{
     {"appearance", "candidate"},
     {"input", "typing"},
-    {"expression", "expression"},
-    {"typing-statistics", "stats"},
     {"shortcuts", "shortcuts"},
-    {"dictionary", "lexicon"},
-    {"vocabulary", "lexicon"},
-    {"skin", "themes"},
-    {"screen-keyboard", "osk"},
-    {"handwriting", "osk"},
-    {"voice", "voice"},
-    {"ai", "ai"},
-    {"mcp", "ai"},
-    {"tools", "clip"},
-    {"plugins", "plugins"},
     {"floating-toolbar", "toolbar"},
-    {"developer", "dev"},
     {"help", "about"},
     {"about", "about"},
     {"feedback", "about"},
@@ -101,7 +60,6 @@ constexpr const Page *find_page(std::string_view id) {
   return nullptr;
 }
 
-// The page an incoming `settings:<id>` route opens. A category id resolves through the alias table; a page id of this window resolves to itself. Anything else, including an empty id, opens the default page.
 constexpr std::string_view page_for_route(std::string_view route) {
   for (const auto &alias : route_aliases)
     if (alias.route == route)
@@ -111,10 +69,8 @@ constexpr std::string_view page_for_route(std::string_view route) {
   return default_page;
 }
 
-// 传入的路由在本次构建里打开的页面：与 `page_for_route` 相同，只是手写识别器只认汉字，不提供手写的版本（日文、越南文和藏文版的 `MSIME_EDITION_HANDWRITING` 为 0）没有手写可设置，`handwriting` 改为打开默认页，与共享设置 UI 只在有手写时才把 `handwriting` 别名到屏幕键盘页一致。每个页面每个版本都有。版本的开关由调用方传进来，这个头文件因此不依赖版本宏，主机上的单元测试也能把两种答案都查到。
-constexpr std::string_view offered_page_for_route(std::string_view route, bool handwriting) {
-  if (route == "handwriting" && !handwriting)
-    return default_page;
+// 手写已移除，传入的版本开关仅为兼容旧调用点保留。
+constexpr std::string_view offered_page_for_route(std::string_view route, bool) {
   return page_for_route(route);
 }
 

@@ -4,7 +4,6 @@
 #include "MetasequoiaIME.h"
 #include "CandidateListUIPresenter.h"
 #include "Ipc.h"
-#include "KeyPressStatisticsQueue.h"
 
 void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
 {
@@ -93,8 +92,7 @@ STDAPI CMetasequoiaIME::OnSetFocus(_In_ ITfDocumentMgr *pDocMgrFocus, _In_ ITfDo
     if (pDocMgrFocus == nullptr)
     {
         // Document focus left: hand the key counts over now rather than when the timer fires.
-        FlushKeyPressStatistics();
-    }
+        }
     if (!IsNamedpipeFocusStateOwner(this))
     {
         return S_OK;

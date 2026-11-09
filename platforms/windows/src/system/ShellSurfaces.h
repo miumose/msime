@@ -23,62 +23,26 @@ struct ShellLaunchContext {
   std::filesystem::path state_root;
   std::filesystem::path host_options;
 };
-// The floating toolbar, the input modes and the stored switches belong to this process, so they are the rows the shell never hears about. 主题 and 词库… open their pages of the settings app by the ids it already routes.
+// The floating toolbar, the input modes and the stored switches belong to this process, so they are the rows the shell never hears about. 主题 opens the candidate page of the settings app by the ids it already routes.
 inline std::optional<ShellSurfaceRequest>
 shell_surface_request(TrayMenuCommand command) {
   switch (command) {
-  case TrayMenuCommand::OpenEmojiPanel:
-    return ShellSurfaceRequest{"emoji", {}};
-  case TrayMenuCommand::OpenHandwritingPanel:
-    return ShellSurfaceRequest{"handwriting", {}};
-  case TrayMenuCommand::OpenKeyboardPanel:
-    return ShellSurfaceRequest{"keyboard", {}};
   case TrayMenuCommand::OpenSettings:
     return ShellSurfaceRequest{{}, {}};
   case TrayMenuCommand::OpenAbout:
     return ShellSurfaceRequest{{}, "about"};
-  // 检查更新在设置窗口「关于」页里完成（msime_client_update_check），和「关于」一行打开同一页。
-  case TrayMenuCommand::CheckForUpdates:
-    return ShellSurfaceRequest{{}, "about"};
   case TrayMenuCommand::OpenTheme:
-    return ShellSurfaceRequest{{}, "skin"};
-  case TrayMenuCommand::OpenDictionary:
-    return ShellSurfaceRequest{{}, "dictionary"};
-  // 设置窗口把 help 和 feedback 都落到「关于」页：帮助与反馈和共享桌面侧栏一样并进了「关于」（SettingsNavigation.h 的 route_aliases）。
-  case TrayMenuCommand::OpenHelp:
-    return ShellSurfaceRequest{{}, "help"};
-  case TrayMenuCommand::OpenFeedback:
-    return ShellSurfaceRequest{{}, "feedback"};
-  // 共享应用按 cloud-clipboard 路由打开面板，打开前记下前台的编辑器（panel_input.rs 的 remember_opening_panel_target），所以条目能直接输入回原来的编辑器。托盘卡片不抢焦点，点这一行时前台仍是那个编辑器。
-  case TrayMenuCommand::OpenCloudClipboard:
-    return ShellSurfaceRequest{"cloud-clipboard", {}};
-  // 「云词库…」打开共享应用的云词库面板，路由与 macOS 的 MSIMEOpenDesktopCloudDictionary 相同（client-core 的 SurfaceRoute::CloudDictionary）。
-  case TrayMenuCommand::OpenCloudDictionary:
-    return ShellSurfaceRequest{"cloud-dictionary", {}};
-  // 「背单词（今日待复习 N）…」打开共享应用的背单词面板，路由与 macOS 输入菜单的同一行相同（client-core 的 SurfaceRoute::Vocabulary）；Windows 7 的面板宿主认同一个路由。
-  case TrayMenuCommand::OpenVocabulary:
-    return ShellSurfaceRequest{"vocabulary", {}};
-  // 系统表情面板、官网和隐藏工具栏都不是外壳的界面。
+    return ShellSurfaceRequest{{}, "candidate"};
+  // 系统表情面板和隐藏工具栏都不是外壳的界面。
   case TrayMenuCommand::OpenSystemEmoji:
-  case TrayMenuCommand::OpenWebsite:
-  case TrayMenuCommand::OpenPromotion:
   case TrayMenuCommand::HideFloatingToolbar:
   case TrayMenuCommand::ToggleFloatingToolbar:
   case TrayMenuCommand::SelectChinese:
   case TrayMenuCommand::SelectEnglish:
   case TrayMenuCommand::ToggleFullwidth:
   case TrayMenuCommand::ToggleChinesePunctuation:
-  case TrayMenuCommand::ToggleTranslations:
   case TrayMenuCommand::SelectQuanpin:
   case TrayMenuCommand::SelectShuangpin:
-  case TrayMenuCommand::SelectWubi:
-  case TrayMenuCommand::SelectJapanese:
-  case TrayMenuCommand::SelectKorean:
-  case TrayMenuCommand::SelectCantonese:
-  case TrayMenuCommand::SelectZhuyin:
-  case TrayMenuCommand::SelectVietnamese:
-  case TrayMenuCommand::SelectTibetan:
-  case TrayMenuCommand::SelectStroke:
   case TrayMenuCommand::ToggleDedicatedEnglish:
   case TrayMenuCommand::ToggleTraditionalOutput:
   case TrayMenuCommand::SelectTheme:

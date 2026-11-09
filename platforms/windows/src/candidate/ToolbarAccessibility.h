@@ -26,13 +26,6 @@ inline const char *toolbar_accessible_automation_id(int button) {
     return "MetasequoiaFloatingToolbarFullWidth";
   case kToolbarCharacterSet:
     return "MetasequoiaFloatingToolbarTraditionalOutput";
-  case kToolbarEmoji:
-    return "MetasequoiaFloatingToolbarEmoji";
-  case kToolbarHandwriting:
-    return "MetasequoiaFloatingToolbarHandwriting";
-  case kToolbarScreenKeyboard:
-    return "MetasequoiaFloatingToolbarScreenKeyboard";
-    return "MetasequoiaFloatingToolbarVoice";
   case kToolbarSettings:
     return "MetasequoiaFloatingToolbarSettings";
   case kToolbarHide:

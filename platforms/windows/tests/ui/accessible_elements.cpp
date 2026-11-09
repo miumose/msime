@@ -112,12 +112,12 @@ void toolbar() {
   const auto title = toolbar_scheme_title("shuangpin", "xiaohe", "wubi86");
   // 名称就是悬停提示，与 macOS 工具栏 accessibilityLabel == toolTip 一致。
   const std::wstring language_tip =
-      toolbar_tooltip(kToolbarLanguage, true, language, title, true, L"水杉输入法");
+      toolbar_tooltip(kToolbarLanguage, true, language, title, L"水杉输入法");
   require(language_tip == L"小鹤双拼 · 切换到英文输入");
   const std::vector<ToolbarAccessibleButton> buttons{
       {kToolbarLanguage, "小鹤双拼 · 切换到英文输入", true},
       {kToolbarPunctuation, "切换到西文标点", true},
-      {kToolbarHandwriting, "打开水杉手写识别板", false},
+      {kToolbarInputScheme, "切换输入方案", true},
       {kToolbarSettings, "打开水杉输入法设置", true}};
   const auto tree = toolbar_accessible_tree(buttons, metrics, 1.5, true, "水杉输入法");
   require(tree.container == AccessibleContainer::ToolBar);
@@ -138,9 +138,6 @@ void toolbar() {
   require(punctuation.bounds.left == std::floor(cell.left * 1.5));
   require(punctuation.bounds.right == std::ceil(cell.right * 1.5));
   require(punctuation.bounds.top == std::floor(cell.top * 1.5));
-  // 共享应用不在时手写按钮不可用，读屏也执行不了它。
-  const auto &handwriting = element(tree, toolbar_accessible_id(kToolbarHandwriting));
-  require(!handwriting.enabled && !handwriting.invokable);
   require(element(tree, toolbar_accessible_id(kToolbarSettings)).name == "打开水杉输入法设置");
   // logo 关掉时那里只是握把，没有图片元素。
   const auto grip = toolbar_accessible_tree(buttons, toolbar_metrics(24.0, true, false), 1.0, false,
@@ -155,7 +152,6 @@ void toolbar() {
 void tray() {
   TrayMenuCapabilities capabilities;
   capabilities.settings = true;
-  capabilities.emoji_panel = true;
   capabilities.product_name = "水杉输入法";
   TrayMenuState state;
   state.chinese = true;
@@ -197,12 +193,8 @@ void tray() {
   require(tree.elements[find("中文标点")].checked == std::optional<bool>(true));
   const auto &theme = tree.elements[find("主题")];
   require(theme.help == "跟随系统" && theme.accelerator.empty());
-  // 开关型工具格开着、关着都报告；打开面板的格子没有开关。
+  // 工具格是开关，开着、关着都报告。
   require(tree.elements[find("工具栏")].checked == std::optional<bool>(true));
-  require(!tree.elements[find("表情")].checked);
-  // 没有对应能力的格子不可用，也执行不了。
-  const auto &voice = tree.elements[find("语音")];
-  require(!voice.enabled && !voice.invokable);
   // 鼠标悬停（没有键盘高亮）时没有焦点。
   require(!accessible_focus(tray_menu_accessible_tree(items, geometry, 1.0, std::nullopt)));
   // 高亮停在不可执行的行上不算焦点。

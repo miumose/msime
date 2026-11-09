@@ -1,6 +1,6 @@
-#include <set>
 #include "TrayMenuLayout.h"
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -29,31 +29,30 @@ size_t find(const std::vector<TrayMenuItem> &items, TrayMenuCommand command) {
   throw std::runtime_error("Tray menu row missing");
 }
 int main() {
-  TrayMenuCapabilities all{true, true, true, true, true, true, true, true, true};
-  // full 的卡片：全部方案、产品名「水杉输入法」。写明而不是取本次构建的版本，这个测试在哪个版本的构建里都查同一张卡片。
-  all.schemes = scheme::all_schemes();
+  TrayMenuCapabilities all;
+  all.floating_toolbar = true;
+  all.settings = true;
+  all.schemes = scheme::OfferedSchemes{};
+  all.schemes.offered[scheme::Quanpin] = true;
+  all.schemes.offered[scheme::Shuangpin] = true;
   all.product_name = "水杉输入法";
   TrayMenuState state;
   state.chinese = true;
   state.fullwidth = false;
   state.chinese_punctuation = true;
-  state.translations = true;
   state.scheme = "quanpin";
   state.shuangpin_profile = "xiaohe";
   state.theme_title = "水杉";
   state.theme = "shuishan";
   state.themes = {{"system", "跟随系统"}, {"shuishan", "水杉"}, {"night", "夜青"}};
   state.language_hint = tray_menu_language_hint(true, false, true);
-  all.cloud_clipboard = true;
-  all.cloud_dictionary = true;
   const auto items = tray_menu_items(all, state);
-  // 输入方案页：返回行、分隔线和方案的单选行。
   auto schemes_of = [&](const TrayMenuCapabilities &capabilities,
                         const TrayMenuState &value) {
     return tray_menu_items(capabilities, value, TrayMenuPage::Schemes);
   };
 
-  // 主页的顺序：标题、输入语言和英文候选模式、几个开关、输入方案和主题两个翻页行、宿主工具条（与 macOS 同序：工具栏、表情、键盘、手写、语音），然后是云剪贴板、云词库和设置应用的页面。
+  // 主页的顺序：标题、输入语言和英文候选模式、几个开关、输入方案和主题两个翻页行、工具栏一格，然后是设置应用的页面。
   {
     using K = TrayMenuRowKind;
     using C = TrayMenuCommand;
@@ -67,20 +66,12 @@ int main() {
         {K::Item, C::ToggleTraditionalOutput},
         {K::Item, C::ToggleFullwidth},
         {K::Item, C::ToggleChinesePunctuation},
-        {K::Item, C::ToggleTranslations},
         {K::Separator, C::OpenSettings},
         {K::Item, C::ShowSchemes},
         {K::Item, C::ShowThemes},
         {K::Separator, C::OpenSettings},
         {K::Tool, C::ToggleFloatingToolbar},
-        {K::Tool, C::OpenEmojiPanel},
-        {K::Tool, C::OpenKeyboardPanel},
-        {K::Tool, C::OpenHandwritingPanel},
-        {K::Tool, C::ToggleVoiceInput},
         {K::Separator, C::OpenSettings},
-        {K::Item, C::OpenCloudClipboard},
-        {K::Item, C::OpenCloudDictionary},
-        {K::Item, C::OpenDictionary},
         {K::Item, C::OpenSettings},
         {K::Item, C::OpenAbout},
     };
@@ -91,82 +82,37 @@ int main() {
         require(items[index].command == expected[index].second);
     }
     require(items[0].label == "水杉输入法");
-    // 与 macOS 输入菜单相同的文案。
     require(items[2].label == "中文输入" && items[3].label == "英文输入" &&
             items[4].label == "英文候选模式");
     require(items[6].label == "繁体输出" && items[7].label == "全角字符" &&
-            items[8].label == "中文标点" && items[9].label == "显示译文");
-    require(items[11].label == "输入方案" && items[11].hint == "全拼" &&
+            items[8].label == "中文标点");
+    require(items[10].label == "输入方案" && items[10].hint == "全拼" &&
+            items[10].submenu);
+    require(items[11].label == "主题" && items[11].hint == "水杉" &&
             items[11].submenu);
-    require(items[12].label == "主题" && items[12].hint == "水杉" &&
-            items[12].submenu);
-    require(items[20].label == "云剪贴板…" && items[21].label == "云词库…" &&
-            items[22].label == "词库…" && items[23].label == "水杉输入法设置…" &&
-            items[24].label == "关于水杉输入法…");
+    require(items[13].label == "工具栏");
+    require(items[15].label == "水杉输入法设置…" &&
+            items[16].label == "关于水杉输入法…");
     for (const auto &row : items)
       require(!row.back && (row.submenu == (row.command == C::ShowSchemes ||
                                             row.command == C::ShowThemes) ||
                             row.kind != K::Item));
   }
-  // 「背单词」一行：今天有卡在等时排在云词库之后，写出张数；没有待复习、读不出来、正在组字或共享应用不在时不列出，主页和原来一样。
-  {
-    const auto absent = [](const std::vector<TrayMenuItem> &rows) {
-      for (const auto &row : rows)
-        if (row.kind == TrayMenuRowKind::Item &&
-            row.command == TrayMenuCommand::OpenVocabulary)
-          return false;
-      return true;
-    };
-    auto panel = all;
-    panel.vocabulary_panel = true;
-    auto due = state;
-    due.vocabulary_due = 12;
-    const auto rows = tray_menu_items(panel, due);
-    require(rows.size() == items.size() + 1);
-    const auto index = find(rows, TrayMenuCommand::OpenVocabulary);
-    require(index == find(rows, TrayMenuCommand::OpenCloudDictionary) + 1);
-    require(rows[index].label == "背单词（今日待复习 12）…" &&
-            rows[index].available && !rows[index].checked);
-    require(tray_menu_closes_after(TrayMenuCommand::OpenVocabulary));
-    // 多了这一行的卡片高一行，照样按设计尺寸放得进 150% 缩放下 1080p 的工作区；200% 缩放（约 500 DIP）时压到最小行高以内也放得下，最后一行不被裁掉。
-    {
-      const TrayMenuMetrics design;
-      const auto taller = tray_menu_geometry(rows, design);
-      require(taller.rows.size() == rows.size());
-      require(near(taller.size.height, tray_menu_geometry(items, design).size.height + design.row_height));
-      const double work = 1040.0 / 1.5;
-      require(taller.size.height <= work);
-      require(near(tray_menu_fitted_metrics(rows, design, work).row_height, design.row_height));
-      const double short_work = 500.0;
-      const auto fitted = tray_menu_fitted_metrics(rows, design, short_work);
-      require(fitted.row_height >= tray_menu_compact_row_height && fitted.row_height < design.row_height);
-      require(tray_menu_geometry(rows, fitted).size.height <= short_work + 0.001);
-    }
-    require(absent(items) && absent(tray_menu_items(panel, state)));
-    auto unreadable = due;
-    unreadable.vocabulary_due = -1;
-    require(absent(tray_menu_items(panel, unreadable)));
-    auto composing = due;
-    composing.composing = true;
-    require(absent(tray_menu_items(panel, composing)));
-    require(absent(tray_menu_items(all, due)));
-  }
-  // 输入方案页：第一行返回主页，下面是全部方案，和悬浮工具栏的方案菜单是同一组行。
+  // 输入方案页：第一行返回主页，下面是全拼和双拼，和悬浮工具栏的方案菜单是同一组行。
   {
     const auto page = schemes_of(all, state);
-    require(page.size() == 12);
+    require(page.size() == 4);
     require(page[0].kind == TrayMenuRowKind::Item &&
             page[0].command == TrayMenuCommand::ShowMain && page[0].back &&
             page[0].label == "输入方案");
     require(page[1].kind == TrayMenuRowKind::Separator);
     const auto shared = tray_menu_scheme_items(all, state);
-    require(shared.size() == 10);
+    require(shared.size() == 2);
     for (size_t index = 0; index < shared.size(); ++index)
       require(page[index + 2].command == shared[index].command &&
               page[index + 2].label == shared[index].label &&
               page[index + 2].checked == shared[index].checked);
-    require(page[2].label == "全拼" && page[3].label == "双拼（小鹤）" &&
-            page[4].label == "五笔 86" && page[11].label == "笔画");
+    require(page[2].label == "全拼" && page[3].label == "双拼（小鹤）");
   }
   // 主题页：返回行、目录里的主题（勾着当前的，行的值是主题 id），最后是设置应用的主题页。
   {
@@ -194,7 +140,7 @@ int main() {
     auto empty = state;
     empty.themes.clear();
     const auto rows = tray_menu_items(all, empty);
-    require(!rows[12].available && rows[12].command == TrayMenuCommand::ShowThemes);
+    require(!rows[11].available && rows[11].command == TrayMenuCommand::ShowThemes);
   }
   // 翻页的行只在卡片里换页，不收起卡片。
   require(tray_menu_page_target(TrayMenuCommand::ShowSchemes) == TrayMenuPage::Schemes);
@@ -205,40 +151,8 @@ int main() {
                        TrayMenuCommand::ShowMain})
     require(!tray_menu_closes_after(command));
   require(tray_menu_closes_after(TrayMenuCommand::SelectTheme) &&
-          tray_menu_closes_after(TrayMenuCommand::OpenCloudClipboard) &&
-          tray_menu_closes_after(TrayMenuCommand::OpenCloudDictionary) &&
           tray_menu_closes_after(TrayMenuCommand::ToggleTraditionalOutput) &&
           tray_menu_closes_after(TrayMenuCommand::ToggleDedicatedEnglish));
-
-  // 只提供五笔的版本：方案组只剩五笔一行，标题和「关于」用这个版本的名字。
-  {
-    auto wubi = all;
-    wubi.schemes = scheme::OfferedSchemes{};
-    wubi.schemes.offered[scheme::Wubi] = true;
-    wubi.schemes.fallback = scheme::Wubi;
-    wubi.product_name = "水杉五笔";
-    auto wubi_state = state;
-    wubi_state.scheme = "wubi";
-    const auto main = tray_menu_items(wubi, wubi_state);
-    require(main.size() == items.size());
-    require(main[0].label == "水杉五笔" && main.back().label == "关于水杉五笔…");
-    require(main[find(main, TrayMenuCommand::OpenSettings)].label == "水杉五笔设置…");
-    require(main[find(main, TrayMenuCommand::ShowSchemes)].hint == "五笔 86");
-    const auto rows = schemes_of(wubi, wubi_state);
-    require(rows.size() == 3);
-    require(rows[find(rows, TrayMenuCommand::SelectWubi)].checked);
-    for (auto command : {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
-                         TrayMenuCommand::SelectJapanese, TrayMenuCommand::SelectTibetan,
-                         TrayMenuCommand::SelectStroke}) {
-      bool present = true;
-      try {
-        find(rows, command);
-      } catch (const std::runtime_error &) {
-        present = false;
-      }
-      require(!present);
-    }
-  }
 
   // Hints: the configured CN/EN key, the TIP's own shortcuts and the theme name.
   require(items[find(items, TrayMenuCommand::SelectChinese)].hint == "Shift");
@@ -275,15 +189,11 @@ int main() {
   require(checked(items, TrayMenuCommand::SelectChinese) &&
           !checked(items, TrayMenuCommand::SelectEnglish));
   require(!checked(items, TrayMenuCommand::ToggleFullwidth) &&
-          checked(items, TrayMenuCommand::ToggleChinesePunctuation) &&
-          checked(items, TrayMenuCommand::ToggleTranslations));
+          checked(items, TrayMenuCommand::ToggleChinesePunctuation));
   {
     const auto page = schemes_of(all, state);
     require(checked(page, TrayMenuCommand::SelectQuanpin) &&
-            !checked(page, TrayMenuCommand::SelectShuangpin) &&
-            !checked(page, TrayMenuCommand::SelectWubi) &&
-            !checked(page, TrayMenuCommand::SelectJapanese) &&
-            !checked(page, TrayMenuCommand::SelectKorean));
+            !checked(page, TrayMenuCommand::SelectShuangpin));
   }
   // 繁体输出跟随存储的开关。
   require(!checked(items, TrayMenuCommand::ToggleTraditionalOutput));
@@ -301,7 +211,7 @@ int main() {
     require(!available(rows, TrayMenuCommand::ToggleChinesePunctuation) &&
             checked(rows, TrayMenuCommand::ToggleChinesePunctuation));
   }
-  // 英文候选模式：TIP 报告中文、方案有这个模式时可用，勾跟随 Engine 的英文模式；TIP 在英文状态、状态未知，或者方案在 TIP 的宿主会话里组字时不可用。
+  // 英文候选模式：TIP 报告中文、方案有这个模式时可用，勾跟随 Engine 的英文模式；TIP 在英文状态或状态未知时不可用。
   {
     require(available(items, TrayMenuCommand::ToggleDedicatedEnglish) &&
             !checked(items, TrayMenuCommand::ToggleDedicatedEnglish));
@@ -314,113 +224,41 @@ int main() {
     rows = tray_menu_items(all, dedicated);
     require(!available(rows, TrayMenuCommand::ToggleDedicatedEnglish) &&
             !checked(rows, TrayMenuCommand::ToggleDedicatedEnglish));
-    for (const char *inline_scheme : {"korean", "zhuyin", "vietnamese", "tibetan"}) {
-      auto next = state;
-      next.scheme = inline_scheme;
-      require(!available(tray_menu_items(all, next),
-                         TrayMenuCommand::ToggleDedicatedEnglish));
-    }
-    for (const char *scheme : {"quanpin", "shuangpin", "wubi", "japanese", "cantonese", "stroke"}) {
-      auto next = state;
-      next.scheme = scheme;
-      require(available(tray_menu_items(all, next),
-                        TrayMenuCommand::ToggleDedicatedEnglish));
-    }
     using A = TrayMenuEnglishAction;
     require(tray_menu_dedicated_english_action(true, false, "quanpin") == A::Enter);
     require(tray_menu_dedicated_english_action(true, true, "quanpin") == A::Leave);
     require(tray_menu_dedicated_english_action(false, true, "quanpin") == A::Unavailable);
     require(tray_menu_dedicated_english_action(std::nullopt, false, "quanpin") ==
             A::Unavailable);
-    require(tray_menu_dedicated_english_action(true, false, "korean") == A::Unavailable);
   }
   // Exactly one scheme is marked, whichever it is.
-  for (const char *scheme : {"quanpin", "shuangpin", "wubi", "japanese", "korean", "cantonese", "zhuyin",
-                             "vietnamese", "tibetan", "stroke"}) {
+  for (const char *scheme : {"quanpin", "shuangpin"}) {
     auto next = state;
     next.scheme = scheme;
     const auto rows = schemes_of(all, next);
     int marked = 0;
-    for (auto command :
-         {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
-          TrayMenuCommand::SelectWubi, TrayMenuCommand::SelectJapanese,
-          TrayMenuCommand::SelectKorean, TrayMenuCommand::SelectCantonese,
-          TrayMenuCommand::SelectZhuyin, TrayMenuCommand::SelectVietnamese,
-          TrayMenuCommand::SelectTibetan, TrayMenuCommand::SelectStroke})
+    for (auto command : {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin})
       marked += checked(rows, command) ? 1 : 0;
     require(marked == 1);
   }
-  // Every scheme row names the stored value it selects, and the stroke row is 笔画.
-  require(std::string(tray_menu_scheme(TrayMenuCommand::SelectStroke)) == "stroke");
-  {
-    auto stroke = state;
-    stroke.scheme = "stroke";
-    const auto rows = schemes_of(all, stroke);
-    require(checked(rows, TrayMenuCommand::SelectStroke) &&
-            !checked(rows, TrayMenuCommand::SelectQuanpin));
-  }
-  {
-    // Japanese is the language of the Japanese scheme, as the toolbar's 日 shows.
-    auto japanese = state;
-    japanese.scheme = "japanese";
-    const auto rows = tray_menu_items(all, japanese);
-    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "日语输入");
-    require(checked(schemes_of(all, japanese), TrayMenuCommand::SelectJapanese));
-  }
-  {
-    // Korean is the language of the Korean scheme, as the toolbar's 한 shows.
-    auto korean = state;
-    korean.scheme = "korean";
-    const auto rows = tray_menu_items(all, korean);
-    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "韩语输入");
-    require(checked(schemes_of(all, korean), TrayMenuCommand::SelectKorean));
-  }
-  {
-    // Vietnamese is a language of its own; Cantonese, Zhuyin and Stroke write Chinese, so the language row stays 中文 for them.
-    auto vietnamese = state;
-    vietnamese.scheme = "vietnamese";
-    auto rows = tray_menu_items(all, vietnamese);
-    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "越南语输入");
-    require(checked(schemes_of(all, vietnamese), TrayMenuCommand::SelectVietnamese));
-    // 藏文同样是独立的语言，语言行显示「藏文输入」。
-    auto tibetan = state;
-    tibetan.scheme = "tibetan";
-    rows = tray_menu_items(all, tibetan);
-    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "藏文输入");
-    require(checked(schemes_of(all, tibetan), TrayMenuCommand::SelectTibetan));
-    for (const char *chinese : {"cantonese", "zhuyin", "stroke"}) {
-      auto next = state;
-      next.scheme = chinese;
-      rows = tray_menu_items(all, next);
-      require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "中文输入");
-    }
-  }
+  // Every scheme row names the stored value it selects.
+  require(std::string(tray_menu_scheme(TrayMenuCommand::SelectQuanpin)) == "quanpin");
+  require(std::string(tray_menu_scheme(TrayMenuCommand::SelectShuangpin)) == "shuangpin");
+  require(!tray_menu_scheme(TrayMenuCommand::SelectChinese));
+  require(!tray_menu_scheme(TrayMenuCommand::OpenSettings));
   // The shuangpin row names the stored layout, and falls back to the plain name.
   require(tray_menu_shuangpin_label("ziranma") == "双拼（自然码）");
   require(tray_menu_shuangpin_label("microsoft") == "双拼（微软）");
   require(tray_menu_shuangpin_label("shoudao") == "双拼（首道）");
   require(tray_menu_shuangpin_label("smart_abc") == "双拼（智能 ABC）");
   require(tray_menu_shuangpin_label("unknown") == "双拼");
-  // 五笔一行跟随存储的码表版本，不认识的版本退回方案名。
-  require(tray_menu_wubi_label("wubi86") == "五笔 86");
-  require(tray_menu_wubi_label("wubi98") == "五笔 98");
-  require(tray_menu_wubi_label("wubixsj") == "五笔 新世纪");
-  require(tray_menu_wubi_label("unknown") == "五笔");
   {
-    auto wubi98 = state;
-    wubi98.scheme = "wubi";
-    wubi98.wubi_profile = "wubi98";
-    const auto rows = schemes_of(all, wubi98);
-    require(rows[find(rows, TrayMenuCommand::SelectWubi)].label == "五笔 98" &&
-            checked(rows, TrayMenuCommand::SelectWubi));
-  }
-  {
-    auto wubixsj = state;
-    wubixsj.scheme = "wubi";
-    wubixsj.wubi_profile = "wubixsj";
-    const auto rows = schemes_of(all, wubixsj);
-    require(rows[find(rows, TrayMenuCommand::SelectWubi)].label == "五笔 新世纪" &&
-            checked(rows, TrayMenuCommand::SelectWubi));
+    auto stored = state;
+    stored.scheme = "shuangpin";
+    stored.shuangpin_profile = "ziranma";
+    const auto rows = schemes_of(all, stored);
+    require(rows[find(rows, TrayMenuCommand::SelectShuangpin)].label == "双拼（自然码）" &&
+            checked(rows, TrayMenuCommand::SelectShuangpin));
   }
   {
     // English, and the Engine's own English mode while the TIP still reports Chinese.
@@ -450,12 +288,11 @@ int main() {
           TrayMenuCommand::ToggleChinesePunctuation})
       require(!available(rows, command) && !checked(rows, command));
     // Stored preferences do not depend on a focused session.
-    require(available(rows, TrayMenuCommand::ToggleTranslations) &&
-            available(rows, TrayMenuCommand::ToggleTraditionalOutput) &&
-            available(schemes_of(all, unknown), TrayMenuCommand::SelectWubi));
+    require(available(rows, TrayMenuCommand::ToggleTraditionalOutput) &&
+            available(schemes_of(all, unknown), TrayMenuCommand::SelectQuanpin));
   }
 
-  // The tool strip keeps every entry the shipped menu offered, each with a unique glyph and a text fallback; only the toolbar is a switch, following the live state.
+  // The tool strip keeps the toolbar switch, with a glyph and a text fallback, following the live state.
   {
     std::set<wchar_t> glyphs;
     size_t tools = 0;
@@ -468,9 +305,9 @@ int main() {
       require(row.icon != 0);
       require(row.icon_fallback && row.icon_fallback[0] != L'\0');
       require(glyphs.insert(row.icon).second);
-      require(row.toggle == (row.command == TrayMenuCommand::ToggleFloatingToolbar));
+      require(row.toggle && row.command == TrayMenuCommand::ToggleFloatingToolbar);
     }
-    require(tools == 5);
+    require(tools == 1);
     require(!checked(items, TrayMenuCommand::ToggleFloatingToolbar));
     auto shown = state;
     shown.floating_toolbar = true;
@@ -480,16 +317,10 @@ int main() {
 
   // A host without a capability shows the row disabled rather than hiding it or accepting a click that would do nothing.
   TrayMenuCapabilities server_only;
-  server_only.schemes = scheme::all_schemes();
   const auto limited = tray_menu_items(server_only, state);
   require(limited.size() == items.size());
   require(available(limited, TrayMenuCommand::ToggleFloatingToolbar));
-  for (auto command :
-       {TrayMenuCommand::OpenEmojiPanel, TrayMenuCommand::OpenHandwritingPanel,
-        TrayMenuCommand::OpenKeyboardPanel, TrayMenuCommand::ToggleVoiceInput,
-        TrayMenuCommand::OpenCloudClipboard, TrayMenuCommand::OpenCloudDictionary,
-        TrayMenuCommand::OpenDictionary,
-        TrayMenuCommand::OpenSettings, TrayMenuCommand::OpenAbout})
+  for (auto command : {TrayMenuCommand::OpenSettings, TrayMenuCommand::OpenAbout})
     require(!available(limited, command));
   // 主题页的主题行只写偏好，不需要外壳；「主题设置…」要设置窗口。
   {
@@ -499,39 +330,14 @@ int main() {
     require(available(limited, TrayMenuCommand::ShowThemes) &&
             available(limited, TrayMenuCommand::ShowSchemes));
   }
-  // 粤拼、注音和笔画需要资源旁边的词库，缺少时引擎会运行别的方案，所以这一行禁用。越南文和藏文不需要数据。
-  {
-    const auto page = schemes_of(server_only, state);
-    require(!available(page, TrayMenuCommand::SelectCantonese) &&
-            !available(page, TrayMenuCommand::SelectZhuyin) &&
-            !available(page, TrayMenuCommand::SelectStroke) &&
-            available(page, TrayMenuCommand::SelectVietnamese) &&
-            available(page, TrayMenuCommand::SelectTibetan));
-  }
-  {
-    auto cantonese_only = server_only;
-    cantonese_only.cantonese = true;
-    const auto rows = schemes_of(cantonese_only, state);
-    require(available(rows, TrayMenuCommand::SelectCantonese) &&
-            !available(rows, TrayMenuCommand::SelectZhuyin) &&
-            !available(rows, TrayMenuCommand::SelectStroke));
-  }
-  {
-    auto stroke_only = server_only;
-    stroke_only.stroke = true;
-    const auto rows = schemes_of(stroke_only, state);
-    require(available(rows, TrayMenuCommand::SelectStroke) &&
-            !available(rows, TrayMenuCommand::SelectCantonese) &&
-            !available(rows, TrayMenuCommand::SelectZhuyin));
-  }
   // Modes and stored switches need no shell.
   for (auto command :
        {TrayMenuCommand::SelectChinese, TrayMenuCommand::ToggleFullwidth,
-        TrayMenuCommand::ToggleTranslations})
+        TrayMenuCommand::ToggleTraditionalOutput})
     require(available(limited, command));
   require(available(schemes_of(server_only, state), TrayMenuCommand::SelectQuanpin));
 
-  // Geometry: the design's 260 wide card, 4 padding, 32 rows, one 52 strip shared by the five tools.
+  // Geometry: the design's 260 wide card, 4 padding, 32 rows, one 52 strip for the toolbar tool.
   const TrayMenuMetrics metrics;
   require(near(metrics.width, 260.0) && near(metrics.padding, 4.0) &&
           near(metrics.row_height, 32.0) && near(metrics.item_radius, 4.0) &&
@@ -541,7 +347,7 @@ int main() {
   require(near(geometry.size.width, 260.0));
   const double expected_height =
       metrics.padding * 2.0 + metrics.header_height +
-      metrics.separator_height * 5.0 + metrics.row_height * 14.0 +
+      metrics.separator_height * 5.0 + metrics.row_height * 10.0 +
       metrics.tool_height;
   require(near(geometry.size.height, expected_height));
   require(near(tray_menu_size(items, metrics).height, expected_height));
@@ -585,13 +391,10 @@ int main() {
     const auto chinese = geometry.rows[find(items, TrayMenuCommand::SelectChinese)];
     require(near(chinese.bottom - chinese.top, 32.0));
     require(near(chinese.left, 4.0) && near(chinese.right, 256.0));
-    const auto first_tool =
+    const auto tool =
         geometry.rows[find(items, TrayMenuCommand::ToggleFloatingToolbar)];
-    const auto last_tool =
-        geometry.rows[find(items, TrayMenuCommand::ToggleVoiceInput)];
-    require(near(first_tool.left, 4.0) && near(last_tool.right, 256.0));
-    require(near(first_tool.right - first_tool.left, 252.0 / 5.0));
-    require(near(first_tool.bottom - first_tool.top, metrics.tool_height));
+    require(near(tool.left, 4.0) && near(tool.right, 256.0));
+    require(near(tool.bottom - tool.top, metrics.tool_height));
     require(near(geometry.rows[1].bottom - geometry.rows[1].top,
                  metrics.separator_height));
   }
@@ -631,9 +434,9 @@ int main() {
             !hit(items, geometry.size.width, chinese.top + 1.0));
     // The side padding belongs to no row.
     require(!hit(items, 2.0, chinese.top + 1.0));
-    const auto emoji = find(limited, TrayMenuCommand::OpenEmojiPanel);
-    const auto [ex, ey] = centre(tray_menu_geometry(limited, metrics).rows[emoji]);
-    require(!hit(limited, ex, ey));
+    const auto unavailable = find(limited, TrayMenuCommand::OpenSettings);
+    const auto [ux, uy] = centre(tray_menu_geometry(limited, metrics).rows[unavailable]);
+    require(!hit(limited, ux, uy));
     const auto toolbar = find(limited, TrayMenuCommand::ToggleFloatingToolbar);
     const auto [tx, ty] =
         centre(tray_menu_geometry(limited, metrics).rows[toolbar]);
@@ -688,12 +491,10 @@ int main() {
     selected.scheme = scheme;
     require(checked(schemes_of(all, selected), row.command));
   }
-  require(scheme_rows == 10);
+  require(scheme_rows == 2);
   for (const auto &row : items)
     if (row.kind == TrayMenuRowKind::Item)
       require(!tray_menu_scheme(row.command));
-  require(!tray_menu_scheme(TrayMenuCommand::SelectChinese));
-  require(!tray_menu_scheme(TrayMenuCommand::OpenSettings));
 
   // 键盘导航：导航键被卡片吞下，单按修饰键什么也不做，别的键和组合键收起卡片并照常交给应用。
   {
@@ -706,7 +507,6 @@ int main() {
               tray_menu_key(0x27, false, highlighted) == Key::Forward &&
               tray_menu_key(0x25, false, highlighted) == Key::Back &&
               tray_menu_key(0x1B, false, highlighted) == Key::Close);
-    // 回车和空格只在有高亮的行时执行它；没有高亮时收起卡片，键照常交给应用。
     require(tray_menu_key(0x0D, false, true) == Key::Activate &&
             tray_menu_key(0x20, false, true) == Key::Activate);
     require(tray_menu_key(0x0D, false, false) == Key::Dismiss &&
@@ -742,7 +542,6 @@ int main() {
     require(press(std::nullopt, Key::Previous).highlight == about);
     require(press(dedicated, Key::First).highlight == chinese);
     require(press(dedicated, Key::Last).highlight == about);
-    // 回车执行高亮的行；没有高亮时什么也不做。
     require(press(dedicated, Key::Activate).activate);
     require(!press(std::nullopt, Key::Activate).activate);
     // → 打开高亮的翻页行，在普通行上什么也不做。
@@ -750,16 +549,12 @@ int main() {
     require(press(schemes_row, Key::Forward).activate);
     require(!press(dedicated, Key::Forward).activate &&
             press(dedicated, Key::Forward).highlight == dedicated);
-    // 工具条里 ←→ 在相邻的几格之间移动，到头不再走。
-    const size_t first_tool = find(items, TrayMenuCommand::ToggleFloatingToolbar);
-    const size_t emoji = find(items, TrayMenuCommand::OpenEmojiPanel);
-    const size_t voice = find(items, TrayMenuCommand::ToggleVoiceInput);
-    require(press(first_tool, Key::Forward).highlight == emoji);
-    require(press(emoji, Key::Back).highlight == first_tool);
-    require(press(first_tool, Key::Back).highlight == first_tool &&
-            !press(first_tool, Key::Back).back);
-    require(press(voice, Key::Forward).highlight == voice &&
-            !press(voice, Key::Forward).activate);
+    // 工具条只有一格：←→ 停在这一格。
+    const size_t toolbar_tool = find(items, TrayMenuCommand::ToggleFloatingToolbar);
+    require(press(toolbar_tool, Key::Forward).highlight == toolbar_tool &&
+            !press(toolbar_tool, Key::Forward).activate);
+    require(press(toolbar_tool, Key::Back).highlight == toolbar_tool &&
+            !press(toolbar_tool, Key::Back).back);
     // Esc 在主页上收起卡片，在子页上回到主页；← 只在子页上回到主页。别的键收起卡片。
     require(press(dedicated, Key::Close).close);
     require(!press(dedicated, Key::Back).back && !press(dedicated, Key::Back).close);

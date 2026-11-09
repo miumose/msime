@@ -66,36 +66,15 @@ tray_menu_mode_command(TrayMenuCommand command, std::optional<bool> chinese,
     return {true, toolbar_mode_command(kToolbarPunctuation, chinese, fullwidth,
                                        chinese_punctuation)};
   case TrayMenuCommand::ToggleFloatingToolbar:
-  case TrayMenuCommand::OpenEmojiPanel:
-  case TrayMenuCommand::OpenHandwritingPanel:
-  case TrayMenuCommand::OpenKeyboardPanel:
   case TrayMenuCommand::OpenSettings:
   case TrayMenuCommand::OpenAbout:
-  case TrayMenuCommand::ToggleTranslations:
   case TrayMenuCommand::SelectQuanpin:
   case TrayMenuCommand::SelectShuangpin:
-  case TrayMenuCommand::SelectWubi:
-  case TrayMenuCommand::SelectJapanese:
-  case TrayMenuCommand::SelectKorean:
-  case TrayMenuCommand::SelectCantonese:
-  case TrayMenuCommand::SelectZhuyin:
-  case TrayMenuCommand::SelectVietnamese:
-  case TrayMenuCommand::SelectTibetan:
-  case TrayMenuCommand::SelectStroke:
   case TrayMenuCommand::OpenTheme:
-  case TrayMenuCommand::OpenDictionary:
   case TrayMenuCommand::OpenSystemEmoji:
-  case TrayMenuCommand::CheckForUpdates:
-  case TrayMenuCommand::OpenWebsite:
-  case TrayMenuCommand::OpenPromotion:
-  case TrayMenuCommand::OpenHelp:
-  case TrayMenuCommand::OpenFeedback:
   case TrayMenuCommand::HideFloatingToolbar:
   case TrayMenuCommand::ToggleDedicatedEnglish:
   case TrayMenuCommand::ToggleTraditionalOutput:
-  case TrayMenuCommand::OpenCloudClipboard:
-  case TrayMenuCommand::OpenCloudDictionary:
-  case TrayMenuCommand::OpenVocabulary:
   case TrayMenuCommand::SelectTheme:
   case TrayMenuCommand::ShowSchemes:
   case TrayMenuCommand::ShowThemes:

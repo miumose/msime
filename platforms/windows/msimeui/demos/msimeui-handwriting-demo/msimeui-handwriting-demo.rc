@@ -1,3 +1,0 @@
-#include "resource.h"
-
-IDI_MSIMEUI_ICON ICON "../../assets/msimeui.ico"

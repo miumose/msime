@@ -1,6 +1,6 @@
 #include "CommonUtils.h"
 #include <windows.h>
-#include <Psapi.h>
+#include <psapi.h>
 
 std::wstring GetCurrentProcessName()
 {

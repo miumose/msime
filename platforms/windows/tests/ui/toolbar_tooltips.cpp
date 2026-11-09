@@ -46,62 +46,50 @@ int main() {
     const ToolbarLanguageState plain;
     const std::wstring product = L"水杉输入法";
     // 语言按钮：方案名 · 下一步的动作。临时英文和 Engine 的英文模式都说切回中文。
-    require(toolbar_tooltip(kToolbarLanguage, true, plain, L"小鹤双拼", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, true, plain, L"小鹤双拼", product) ==
             L"小鹤双拼 · 切换到英文输入");
-    require(toolbar_tooltip(kToolbarLanguage, false, plain, L"全拼", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, false, plain, L"全拼", product) ==
             L"全拼 · 切换到中文输入");
     ToolbarLanguageState dedicated;
     dedicated.dedicated_english = true;
-    require(toolbar_tooltip(kToolbarLanguage, true, dedicated, L"全拼", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, true, dedicated, L"全拼", product) ==
             L"全拼 · 切换到中文输入");
-    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, dedicated, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, dedicated, L"", product) ==
             L"切换到中文输入");
-    require(toolbar_tooltip(kToolbarLanguage, true, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, true, plain, L"", product) ==
             L"切换到英文输入");
     // 状态还不知道时不猜方向。
-    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, plain, L"全拼", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, plain, L"全拼", product) ==
             L"全拼");
-    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarLanguage, std::nullopt, plain, L"", product) ==
             L"中英文切换");
 
     // 两态按钮说点了会切到哪一边。
-    require(toolbar_tooltip(kToolbarPunctuation, true, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarPunctuation, true, plain, L"", product) ==
             L"切换到西文标点");
-    require(toolbar_tooltip(kToolbarPunctuation, false, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarPunctuation, false, plain, L"", product) ==
             L"切换到中文标点");
-    require(toolbar_tooltip(kToolbarFullwidth, true, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarFullwidth, true, plain, L"", product) ==
             L"切换到半角输入");
-    require(toolbar_tooltip(kToolbarFullwidth, false, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarFullwidth, false, plain, L"", product) ==
             L"切换到全角输入");
-    require(toolbar_tooltip(kToolbarCharacterSet, true, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarCharacterSet, true, plain, L"", product) ==
             L"切换到简体输出");
-    require(toolbar_tooltip(kToolbarCharacterSet, false, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarCharacterSet, false, plain, L"", product) ==
             L"切换到繁体输出");
     for (const int button : {kToolbarPunctuation, kToolbarFullwidth, kToolbarCharacterSet})
-      require(!toolbar_tooltip(button, std::nullopt, plain, L"", true, product).empty());
+      require(!toolbar_tooltip(button, std::nullopt, plain, L"", product).empty());
 
-    // 其余按钮说点了打开什么；没有共享应用时表情和屏幕键盘打开的是系统面板。
-    require(toolbar_tooltip(kToolbarInputScheme, std::nullopt, plain, L"", true, product) ==
+    // 其余按钮说点了打开什么。
+    require(toolbar_tooltip(kToolbarInputScheme, std::nullopt, plain, L"", product) ==
             L"切换输入方案");
-    require(toolbar_tooltip(kToolbarEmoji, std::nullopt, plain, L"", true, product) ==
-            L"打开水杉表情面板");
-    require(toolbar_tooltip(kToolbarEmoji, std::nullopt, plain, L"", false, product) ==
-            L"打开系统表情面板");
-    require(toolbar_tooltip(kToolbarScreenKeyboard, std::nullopt, plain, L"", true, product) ==
-            L"打开水杉屏幕键盘");
-    require(toolbar_tooltip(kToolbarScreenKeyboard, std::nullopt, plain, L"", false, product) ==
-            L"打开系统屏幕键盘");
-    require(toolbar_tooltip(kToolbarHandwriting, std::nullopt, plain, L"", true, product) ==
-            L"打开水杉手写识别板");
-    require(toolbar_tooltip(kToolbarVoice, std::nullopt, plain, L"", true, product) ==
-            L"开始或结束语音输入");
-    require(toolbar_tooltip(kToolbarSettings, std::nullopt, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarSettings, std::nullopt, plain, L"", product) ==
             L"打开水杉输入法设置");
-    require(toolbar_tooltip(kToolbarSettings, std::nullopt, plain, L"", true, L"水杉五笔") ==
+    require(toolbar_tooltip(kToolbarSettings, std::nullopt, plain, L"", L"水杉五笔") ==
             L"打开水杉五笔设置");
-    require(toolbar_tooltip(kToolbarHide, std::nullopt, plain, L"", true, product) ==
+    require(toolbar_tooltip(kToolbarHide, std::nullopt, plain, L"", product) ==
             L"隐藏悬浮状态栏");
-    require(toolbar_tooltip(99, std::nullopt, plain, L"", true, product).empty());
+    require(toolbar_tooltip(99, std::nullopt, plain, L"", product).empty());
     std::cout << "Toolbar tooltips: labels match the macOS toolbar\n";
   } catch (const std::exception &failure) {
     std::cerr << failure.what() << '\n';

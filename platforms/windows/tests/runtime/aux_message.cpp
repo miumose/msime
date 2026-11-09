@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 #include <cstring>
-#include <map>
 #include <optional>
 
 using namespace msime::windows;
@@ -147,121 +146,6 @@ int main() {
   // The verbs never claim each other's messages.
   require(!parse_aux_langbar_right_click(L"TerminalDeactivation|7|42"));
   require(!parse_aux_terminal_deactivation(L"LangbarRightClick|1|2|3|4"));
-
-  // Passthrough typing statistics: what the DLL builds is what the Server parses, sorted, and split to fit the pipe.
-  {
-    const auto messages = aux_typing_statistics_messages(true, L"hello");
-    require(messages.size() == 1 && messages[0] == L"TypingStatistics|E|ehllo");
-    const auto bytes = wire(messages[0]);
-    const auto text = aux_text_from_bytes(bytes.data(), bytes.size());
-    require(text.has_value());
-    const auto parsed = parse_aux_typing_statistics(*text);
-    require(parsed && parsed->english && parsed->characters == L"ehllo");
-    const auto chinese = parse_aux_typing_statistics(
-        aux_typing_statistics_messages(false, L"3,1")[0]);
-    require(chinese && !chinese->english && chinese->characters == L",13");
-    require(aux_typing_statistics_messages(true, L"").empty());
-    const std::wstring many(300, L'x');
-    const auto room = max_aux_message_bytes / sizeof(wchar_t) -
-                      std::wstring_view(L"TypingStatistics|E|").size();
-    size_t carried = 0;
-    const auto many_messages = aux_typing_statistics_messages(true, many);
-    require(many_messages.capacity() == (many.size() + room - 1) / room);
-    for (const auto &message : many_messages) {
-      require(message.size() * sizeof(wchar_t) <= max_aux_message_bytes);
-      const auto piece = parse_aux_typing_statistics(message);
-      require(piece.has_value());
-      carried += piece->characters.size();
-    }
-    require(carried == many.size());
-    require(!parse_aux_typing_statistics(L"TypingStatistics|E|"));
-    require(!parse_aux_typing_statistics(L"TypingStatistics|X|a"));
-    require(!parse_aux_typing_statistics(L"TypingStatistics|Ea"));
-    require(!parse_aux_typing_statistics(L"TypingStatisticsX|E|a"));
-    require(!parse_aux_typing_statistics(std::wstring(L"TypingStatistics|E|") + wchar_t(0xD83D)));
-    require(!parse_aux_langbar_right_click(L"TypingStatistics|E|a"));
-  }
-
-  // Key heatmap counts: per-day, sorted by id, split on entry boundaries, and an empty list is the probe.
-  {
-    const std::map<std::wstring, uint64_t> counts{{L"Space", 2}, {L"KeyA", 3}};
-    const auto messages = aux_typing_keys_messages(L"2026-10-01", counts);
-    require(messages.size() == 1 &&
-            messages[0] == L"TypingKeys|2026-10-01|KeyA=3,Space=2");
-    const auto bytes = wire(messages[0]);
-    const auto text = aux_text_from_bytes(bytes.data(), bytes.size());
-    require(text.has_value());
-    const auto parsed = parse_aux_typing_keys(*text);
-    require(parsed && parsed->day == L"2026-10-01" && parsed->counts == counts);
-    require(aux_typing_keys_messages(L"2026-10-01", {}).empty());
-
-    const auto probe = parse_aux_typing_keys(aux_typing_keys_probe(L"2026-10-01"));
-    require(probe && probe->day == L"2026-10-01" && probe->counts.empty());
-    require(aux_typing_keys_probe(L"2026-10-01") == L"TypingKeys|2026-10-01|");
-
-    // A batch wider than one message is carried whole, one entry never straddling two messages.
-    std::map<std::wstring, uint64_t> wide;
-    for (const auto *id : {L"KeyA", L"KeyB", L"KeyC", L"KeyD", L"KeyE", L"KeyF",
-                           L"KeyG", L"KeyH", L"Digit1", L"Digit2", L"ArrowRight",
-                           L"ArrowLeft", L"Backspace", L"NumpadSubtract",
-                           L"BracketRight", L"ControlRight", L"IntlBackslash"})
-      wide.emplace(id, 18446744073709551615ULL);
-    const auto split = aux_typing_keys_messages(L"2026-10-01", wide);
-    require(split.size() > 1);
-    require(split.capacity() >= wide.size());
-    std::map<std::wstring, uint64_t> carried;
-    for (const auto &message : split) {
-      require(message.size() * sizeof(wchar_t) <= max_aux_message_bytes);
-      const auto piece = parse_aux_typing_keys(message);
-      require(piece && piece->day == L"2026-10-01" && !piece->counts.empty());
-      carried.insert(piece->counts.begin(), piece->counts.end());
-    }
-    require(carried == wide);
-
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-1-01|KeyA=1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026/10/01|KeyA=1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA="));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|=1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=0"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=-1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1,"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1,KeyA=2"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|Key A=1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1|KeyB=1"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=18446744073709551616"));
-    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|" + std::wstring(33, L'K') + L"=1"));
-    require(parse_aux_typing_keys(L"TypingKeys|2026-10-01|" + std::wstring(32, L'K') + L"=1").has_value());
-    require(!parse_aux_typing_keys(L"TypingKeysX|2026-10-01|KeyA=1"));
-    require(!parse_aux_typing_statistics(L"TypingKeys|2026-10-01|KeyA=1"));
-    require(!parse_aux_typing_keys(L"TypingStatistics|E|a"));
-  }
-  {
-    // 交给应用的一次按下：客户端、焦点令牌和按键音类别，往返不变，也放得进一条 Aux 消息。
-    const AuxKeySound key{(uint64_t{0xFFFFFFFFu} << 32) | 0xFFFFFFFFu, UINT64_MAX, 2};
-    const auto message = aux_key_sound_message(key);
-    require(message.size() * sizeof(wchar_t) <= max_aux_message_bytes);
-    const auto bytes = wire(message);
-    const auto text = aux_text_from_bytes(bytes.data(), bytes.size());
-    require(text.has_value());
-    const auto parsed = parse_aux_key_sound(*text);
-    require(parsed && parsed->client_id == key.client_id && parsed->focus_token == key.focus_token && parsed->key_class == 2u);
-    require(aux_key_sound_message({7, 9, 0}) == L"KeySound|7|9|0");
-    require(parse_aux_key_sound(L"KeySound|7|9|3")->key_class == 3u);
-    // 只有 msime_client_key_sound 认识的四类；客户端和令牌为 0 都表示没有真实的会话。
-    require(!parse_aux_key_sound(L"KeySound|7|9|4"));
-    require(!parse_aux_key_sound(L"KeySound|0|9|1"));
-    require(!parse_aux_key_sound(L"KeySound|7|0|1"));
-    require(!parse_aux_key_sound(L"KeySound|7|9"));
-    require(!parse_aux_key_sound(L"KeySound|7|9|1|2"));
-    require(!parse_aux_key_sound(L"KeySound|7|9|"));
-    require(!parse_aux_key_sound(L"KeySound|-7|9|1"));
-    require(!parse_aux_key_sound(L"KeySoundX|7|9|1"));
-    require(!parse_aux_key_sound(L"KeySound"));
-    require(!parse_aux_typing_statistics(L"KeySound|7|9|1"));
-    require(!parse_aux_terminal_deactivation(L"KeySound|7|9|1"));
-  }
 
   std::cout << "Aux message: langbar rectangle parsed, malformed rejected\n";
     return 0;

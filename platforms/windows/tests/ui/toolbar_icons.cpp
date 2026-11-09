@@ -35,20 +35,18 @@ int main() {
     require(text(toolbar_icon(kToolbarCharacterSet, true), L"繁"));
     require(text(toolbar_icon(kToolbarCharacterSet, false), L"简"));
     // The utility buttons keep the icon font's glyphs, the counterparts of macOS's SF Symbols.
-    require(toolbar_icon(kToolbarEmoji, std::nullopt).codepoint == 0xE76E);
-    require(toolbar_icon(kToolbarScreenKeyboard, std::nullopt).codepoint == 0xE765);
     require(toolbar_icon(kToolbarSettings, std::nullopt).codepoint == 0xE713);
-    // 手写和语音与托盘工具条同一个字形，切换输入方案是 BulletedList。
-    require(toolbar_icon(kToolbarHandwriting, std::nullopt).codepoint == 0xE70F);
-    require(std::wcscmp(toolbar_icon(kToolbarHandwriting, std::nullopt).fallback, L"写") == 0);
-    require(toolbar_icon(kToolbarVoice, std::nullopt).codepoint == 0xE720);
-    require(std::wcscmp(toolbar_icon(kToolbarVoice, std::nullopt).fallback, L"音") == 0);
+    // 切换输入方案是 BulletedList。
     require(toolbar_icon(kToolbarInputScheme, std::nullopt).codepoint == 0xE8FD);
     require(std::wcscmp(toolbar_icon(kToolbarInputScheme, std::nullopt).fallback, L"方") == 0);
     // 使用 Win7 起自带的微软雅黑，避免不存在的 UI 字体触发逐字回退；字号仍为 macOS 的 0.95，藏文保留独立字体。
     require(std::wcscmp(toolbar_text_font, L"Microsoft YaHei") == 0);
     static_assert(toolbar_glyph_scale == 0.95f);
-    for (int button = kToolbarLanguage; button <= kToolbarInputScheme; ++button)
+    constexpr int buttons[] = {kToolbarLanguage, kToolbarFullwidth,
+                               kToolbarPunctuation, kToolbarCharacterSet,
+                               kToolbarSettings, kToolbarInputScheme,
+                               kToolbarHide};
+    for (const int button : buttons)
       for (const std::optional<bool> state :
            {std::optional<bool>{}, std::optional<bool>{true}, std::optional<bool>{false}})
         require(toolbar_icon(button, state).family == nullptr);
@@ -60,7 +58,7 @@ int main() {
       require(text(toolbar_icon(button, std::nullopt), L"?"));
 
     // 模式按钮依赖文字；功能按钮也保留非空标签，缺图标字体时悬浮栏优先画原生矢量图标。
-    for (int button = kToolbarLanguage; button <= kToolbarInputScheme; ++button)
+    for (const int button : buttons)
       for (const std::optional<bool> state :
            {std::optional<bool>{}, std::optional<bool>{true},
             std::optional<bool>{false}}) {
@@ -85,12 +83,9 @@ int main() {
           toolbar_icon(kToolbarFullwidth, true), toolbar_icon(kToolbarFullwidth, false),
           toolbar_icon(kToolbarPunctuation, true), toolbar_icon(kToolbarPunctuation, false),
           toolbar_icon(kToolbarCharacterSet, true), toolbar_icon(kToolbarCharacterSet, false),
-          toolbar_icon(kToolbarEmoji, std::nullopt),
-          toolbar_icon(kToolbarScreenKeyboard, std::nullopt),
           toolbar_icon(kToolbarSettings, std::nullopt),
-          toolbar_icon(kToolbarHandwriting, std::nullopt),
-          toolbar_icon(kToolbarVoice, std::nullopt),
-          toolbar_icon(kToolbarInputScheme, std::nullopt)}) {
+          toolbar_icon(kToolbarInputScheme, std::nullopt),
+          toolbar_icon(kToolbarHide, std::nullopt)}) {
       if (entry.codepoint)
         require(glyphs.insert(entry.codepoint).second);
       require(texts.insert(entry.fallback).second);
@@ -209,8 +204,8 @@ int main() {
       require(text(toolbar_icon(kToolbarLanguage, true, english_and_japanese), L"En"));
 
       // No other button is affected by the language state.
-      require(toolbar_icon(kToolbarEmoji, std::nullopt, caps).codepoint ==
-              toolbar_icon(kToolbarEmoji, std::nullopt, plain).codepoint);
+      require(toolbar_icon(kToolbarSettings, std::nullopt, caps).codepoint ==
+              toolbar_icon(kToolbarSettings, std::nullopt, plain).codepoint);
       require(text(toolbar_icon(kToolbarFullwidth, true, caps), L"全"));
       require(text(toolbar_icon(kToolbarFullwidth, true, dedicated), L"全"));
     }

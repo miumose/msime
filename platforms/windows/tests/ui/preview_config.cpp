@@ -25,9 +25,9 @@ int main() {
     const auto good = PreviewConfig::parse(document.dump());
     require(good.style == TsfPreeditStyle::Pinyin);
     require(good.floating_toolbar_enabled);
-    // 缺省按钮与 FloatingToolbarSettings 相同：字符集、标点、全半角和设置开，表情和屏幕键盘关。
+    // 缺省按钮与 FloatingToolbarSettings 相同：字符集、标点、全半角和设置都开。
     require(good.floating_toolbar_items ==
-            (std::array<bool, 6>{true, true, true, false, false, true}));
+            (std::array<bool, 4>{true, true, true, true}));
     require(!good.navigation.minus_equal && !good.navigation.comma_period &&
             !good.navigation.brackets && !good.navigation.tab &&
             !good.navigation.page_up_down && !good.navigation.arrows &&
@@ -92,7 +92,7 @@ int main() {
     document["floating_toolbar_enabled"] = true;
     const nlohmann::json toolbar_items{
         {"character_set", false}, {"punctuation", true}, {"fullwidth", false},
-        {"emoji", true}, {"screen_keyboard", true}, {"settings", false}};
+        {"settings", true}};
     document["floating_toolbar_items"] = toolbar_items;
     document["floating_toolbar_x"] = 120;
     document["floating_toolbar_y"] = -40;
@@ -109,9 +109,7 @@ int main() {
     require(!configured_items.floating_toolbar_items[0] &&
             configured_items.floating_toolbar_items[1] &&
             !configured_items.floating_toolbar_items[2] &&
-            configured_items.floating_toolbar_items[3] &&
-            configured_items.floating_toolbar_items[4] &&
-            !configured_items.floating_toolbar_items[5]);
+            configured_items.floating_toolbar_items[3]);
     document["floating_toolbar_items"]["extra"] = true;
     reject(document);
     document["floating_toolbar_items"] = toolbar_items;

@@ -17,10 +17,7 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
                                                  MessageSink message_sink,
                                                  ActivationSink activation,
                                                  TerminalSink terminal,
-                                                 MaintenanceSink maintenance,
-                                                 StatisticsSink statistics,
-                                                 KeysSink keys,
-                                                 KeySoundSink key_sound) {
+                                                 MaintenanceSink maintenance) {
   error = ERROR_SUCCESS;
   if (!sink) {
     error = ERROR_INVALID_PARAMETER;
@@ -41,9 +38,6 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
   aux->activation_ = std::move(activation);
   aux->terminal_ = std::move(terminal);
   aux->maintenance_ = std::move(maintenance);
-  aux->statistics_ = std::move(statistics);
-  aux->keys_ = std::move(keys);
-  aux->key_sound_ = std::move(key_sound);
   aux->worker_ = std::thread([raw = aux.get()] { raw->run(); });
   return aux;
 }
@@ -202,65 +196,6 @@ void AuxListener::run() {
         write_ok(accepted.connection->handle());
       std::lock_guard<std::mutex> lock(stats_mutex_);
       if (done)
-        ++stats_.dispatched;
-      else
-        ++stats_.unknown_verb;
-      continue;
-    }
-    if (const auto statistics = parse_aux_typing_statistics(*text)) {
-      // The batch carries typed characters, so it goes to the sink and nowhere else. The DLL backs off when no "OK" arrives, which is the right answer both when statistics are off and when nobody is listening for them.
-      bool done = false;
-      try {
-        done = statistics_ && statistics_(*statistics);
-      } catch (...) {
-        callback_failed();
-      }
-      if (done)
-        write_ok(accepted.connection->handle());
-      std::lock_guard<std::mutex> lock(stats_mutex_);
-      if (done)
-        ++stats_.dispatched;
-      else
-        ++stats_.unknown_verb;
-      continue;
-    }
-    if (const auto keys = parse_aux_typing_keys(*text)) {
-      // Counts per key only, but still the user's typing: they go to the sink and nowhere else, and silence is the answer whenever statistics are off.
-      bool done = false;
-      try {
-        done = keys_ && keys_(*keys);
-      } catch (...) {
-        callback_failed();
-      }
-      if (done)
-        write_ok(accepted.connection->handle());
-      std::lock_guard<std::mutex> lock(stats_mutex_);
-      if (done)
-        ++stats_.dispatched;
-      else
-        ++stats_.unknown_verb;
-      continue;
-    }
-    if (const auto key = parse_aux_key_sound(*text)) {
-      // 和 TerminalDeactivation 一样，client 是 (pid << 32) | tid，发送方只能替自己的线程报键。
-      ULONG pid = 0;
-      DWORD peer_error = ERROR_SUCCESS;
-      if (!pipe_client_in_session(accepted.connection->handle(), pid, peer_error) ||
-          static_cast<DWORD>(key->client_id >> 32) != pid) {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
-        ++stats_.rejected;
-        continue;
-      }
-      bool wanted = false;
-      try {
-        wanted = key_sound_ && key_sound_(*key);
-      } catch (...) {
-        callback_failed();
-      }
-      if (wanted)
-        write_ok(accepted.connection->handle());
-      std::lock_guard<std::mutex> lock(stats_mutex_);
-      if (wanted)
         ++stats_.dispatched;
       else
         ++stats_.unknown_verb;

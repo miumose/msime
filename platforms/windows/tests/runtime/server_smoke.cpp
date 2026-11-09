@@ -9,7 +9,6 @@
 #include "../core/MaterializedSymlink.h"
 #include "../core/TestHostOptions.h"
 #include "TrayMenuWindow.h"
-#include "WaveOverlay.h"
 #include "WindowsServer.h"
 #include <cstring>
 #include <filesystem>
@@ -363,84 +362,6 @@ int main() {
           require(result == TRUE);
         require(!tray.visible() && !tray.failed());
       }
-    }
-    {
-      WaveOverlay overlay;
-      require(
-          overlay.init(GetModuleHandleW(nullptr), [](WaveOverlay::Action) {}));
-      const auto foreground = GetForegroundWindow();
-      overlay.show();
-      MSG message{};
-      for (size_t i = 0; i < 16 && !IsWindowVisible(overlay.handle()); ++i) {
-        if (PeekMessageW(&message, overlay.handle(), 0, 0, PM_REMOVE)) {
-          TranslateMessage(&message);
-          DispatchMessageW(&message);
-        }
-      }
-      require(IsWindowVisible(overlay.handle()));
-      require(GetForegroundWindow() == foreground);
-      UpdateWindow(overlay.handle());
-      for (const auto &[system_message, wparam] : {
-               std::pair<UINT, WPARAM>{WM_DPICHANGED, 0},
-               std::pair<UINT, WPARAM>{WM_DISPLAYCHANGE, 0},
-               std::pair<UINT, WPARAM>{WM_DWMCOMPOSITIONCHANGED, 0},
-               std::pair<UINT, WPARAM>{WM_SETTINGCHANGE, 0},
-               std::pair<UINT, WPARAM>{WM_POWERBROADCAST,
-                                       PBT_APMRESUMEAUTOMATIC},
-           }) {
-        const auto result =
-            SendMessageW(overlay.handle(), system_message, wparam, 0);
-        if (system_message == WM_POWERBROADCAST)
-          require(result == TRUE);
-        require(GetUpdateRect(overlay.handle(), nullptr, FALSE));
-        UpdateWindow(overlay.handle());
-        require(IsWindowVisible(overlay.handle()));
-      }
-      // The setters post to the overlay's window; handle what they queued before looking at the window.
-      const auto pump = [&] {
-        MSG queued{};
-        for (size_t i = 0; i < 64 && PeekMessageW(&queued, overlay.handle(), 0, 0, PM_REMOVE); ++i) {
-          TranslateMessage(&queued);
-          DispatchMessageW(&queued);
-        }
-      };
-      const auto click_through = [&] {
-        return (GetWindowLongPtrW(overlay.handle(), GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0;
-      };
-      const auto bounds = [&] {
-        RECT rect{};
-        require(GetWindowRect(overlay.handle(), &rect));
-        return rect;
-      };
-      // Only the round cancel and confirm actions take the pointer; every other state lets clicks through to the window below.
-      require(click_through());
-      overlay.set_actions_visible(true);
-      pump();
-      require(!click_through());
-      overlay.set_actions_visible(false);
-      pump();
-      require(click_through());
-      // A failure without a detail is a pill, one with a detail the taller transcript card, and a headline wider than the card widens it.
-      overlay.set_failure(L"Synthetic failure", L"");
-      pump();
-      const RECT pill = bounds();
-      require(click_through());
-      overlay.set_failure(L"Synthetic failure", L"Synthetic provider detail");
-      pump();
-      const RECT card = bounds();
-      require(card.bottom - card.top > pill.bottom - pill.top);
-      require(card.right - card.left > pill.right - pill.left);
-      overlay.set_failure(L"A synthetic failure headline that is clearly wider than the four hundred and twenty point card",
-                          L"Synthetic provider detail");
-      pump();
-      const RECT wide = bounds();
-      require(wide.right - wide.left > card.right - card.left);
-      require(wide.bottom - wide.top == card.bottom - card.top);
-      // Clearing the failure returns the overlay to the compact wave, narrower than the pill.
-      overlay.set_failure(L"", L"");
-      pump();
-      const RECT compact = bounds();
-      require(compact.right - compact.left < pill.right - pill.left);
     }
     {
       CandidateFlyoutWindow flyout([](const CandidateMenuChoice &) {});

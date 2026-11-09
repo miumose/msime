@@ -254,20 +254,6 @@ PumpResult SessionPump::run(const PipeTicket &ticket) {
               preference_revision = state.publish_preferences_at_least(value).revision();
             })) return PumpResult::QueueUnavailable;
       }
-      if ((ticket.capabilities & FanyImeProtocol::OrderedPreferences) &&
-          FanyImeProtocol::IsJapaneseToggleShortcut(packet->keycode, packet->modifiers_down)) {
-        const auto frame = FanyImePreferencePipe::encode({preference_revision,
-            packet->request_id, route.route->token, route.route->epoch});
-        if (!frame) return PumpResult::DispatchFailed;
-        std::vector<std::uint8_t> bytes(sizeof(*frame));
-        std::memcpy(bytes.data(), &*frame, sizeof(*frame));
-        bool sent = false;
-        const bool eligible = focus_.with_active(*route.route, [&] {
-          sent = transport_.send(ticket, FanyImePipeRole::ToTsfWorkerThread, bytes) == KeyEventSendResult::Sent;
-        });
-        if (!eligible) continue;
-        if (!sent) return PumpResult::WriteFailed;
-      }
       if (reply->worker) {
         bool sent = false;
         const bool eligible = focus_.with_active(*route.route, [&] {

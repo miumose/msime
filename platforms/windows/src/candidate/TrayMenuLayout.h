@@ -1,7 +1,6 @@
 #pragma once
 #include "../../common/InputSchemeTraits.h"
 #include "TrayMenuCommand.h"
-#include "../../../common/VocabularyDueMenu.h"
 #include <algorithm>
 #include <cstddef>
 #include <optional>
@@ -12,7 +11,7 @@
 namespace msime::windows {
 // Tray menu contents and geometry. This header decides what the menu offers and where each row sits; drawing and window placement stay with the renderer, so the rules are testable without a desktop.
 //
-// 卡片按共享设计排列：带标志和产品名的标题、输入语言、模式开关、输入方案和主题两个翻页行、宿主工具条、云剪贴板和云词库，以及设置应用的几个页面。行用勾选列而不是行首图标，只有工具条画成图标。
+// 卡片按共享设计排列：带标志和产品名的标题、输入语言、模式开关、输入方案和主题两个翻页行、宿主工具条，以及设置应用的几个页面。行用勾选列而不是行首图标，只有工具条画成图标。
 enum class TrayMenuRowKind {
   // Logo and product name. Not a command.
   Header,
@@ -52,24 +51,11 @@ struct TrayMenuItem {
 // Which surfaces this host can actually open. Anything absent stays visible but disabled, matching how the shipped menu never hides its entries.
 struct TrayMenuCapabilities {
   bool floating_toolbar = true;
-  bool emoji_panel = false;
-  bool handwriting_panel = false;
-  bool keyboard_panel = false;
-  bool voice_input = false;
   bool settings = false;
-  // The Cantonese, Zhuyin and Stroke dictionaries installed beside the resources (language-dictionaries/msime-cantonese.db, msime-zhuyin.db and msime-stroke.db). Without one the Engine answers that scheme with quanpin, so its row is disabled rather than selecting a scheme that would type pinyin.
-  bool cantonese = false;
-  bool zhuyin = false;
-  bool stroke = false;
-  // 本版本提供的方案。不在其中的方案行不出现，而不是显示为不可用：那个方案在这个版本里根本不存在。full 提供全部方案。
+  // 本版本提供的方案。精简版只有全拼和双拼。
   scheme::OfferedSchemes schemes = scheme::edition_schemes();
   // 卡片标题和「关于」行里的产品名（UTF-8），按版本取；full 是「水杉输入法」。
   std::string product_name = MSIME_EDITION_DISPLAY_NAME_UTF8;
-  // 面板宿主（缺省是共享应用 MSIME.exe，MSIME_WINDOWS_PANEL_HOST=native 时是 msime-client-panels.exe）在场时「云剪贴板…」「云词库…」才打得开，否则这两行显示为不可用。
-  bool cloud_clipboard = false;
-  bool cloud_dictionary = false;
-  // 背单词面板同样在共享应用里，它不在时「背单词」一行不列出。
-  bool vocabulary_panel = false;
 };
 // 主题目录里的一项：写进 global_theme 的 id 和主题页上显示的标题。
 struct TrayMenuTheme {
@@ -84,11 +70,8 @@ struct TrayMenuState {
   // The Engine's own English mode: the TIP still reports Chinese, but letters are typed as English until it is left.
   bool dedicated_english = false;
   // Stored preferences.
-  bool translations = true;
   std::string scheme = "quanpin";
   std::string shuangpin_profile = "xiaohe";
-  // 存储的 `wubi_profile`，五笔一行按它标出 86、98 或新世纪。
-  std::string wubi_profile = "wubi86";
   // Title of the selected global theme, shown beside 主题. Empty draws no hint.
   std::string theme_title;
   // The configured CN/EN key, shown beside the language row.
@@ -102,10 +85,6 @@ struct TrayMenuState {
   // 当前的全局主题 id 和本平台的主题目录（按选择器顺序），主题页按它们列出各行。目录为空时主题页没有可选的行。
   std::string theme = "system";
   std::vector<TrayMenuTheme> themes;
-  // 今日待复习的张数（msime_client_vocabulary_due_count），卡片每次打开时现读；读不出来是 -1。
-  int32_t vocabulary_due = 0;
-  // 卡片打开时候选窗正开着（正在组字）：这时不列「背单词」一行。
-  bool composing = false;
 };
 // 卡片的页。和 macOS 输入菜单的「输入方案」「主题」两个子菜单对应：主页上各占一行，点开后整张卡片换成那一页，第一行返回主页。卡片不抢焦点，没有子菜单那样的悬停展开，翻页是最不容易误触的做法；十个方案收进一页后，加上英文候选模式、繁体输出和云剪贴板，卡片仍放得进 150% 缩放的 1080p 屏幕。
 enum class TrayMenuPage { Main, Schemes, Themes };
@@ -156,38 +135,12 @@ inline std::string tray_menu_shuangpin_label(const std::string &profile) {
     return "双拼（智能 ABC）";
   return "双拼";
 }
-// 五笔一行标出存储的码表版本，与工具栏的「五笔 86」「五笔 98」「五笔 新世纪」一致；不认识的版本只写方案名，不猜一个错的。
-inline std::string tray_menu_wubi_label(const std::string &profile) {
-  if (profile == "wubi86")
-    return "五笔 86";
-  if (profile == "wubi98")
-    return "五笔 98";
-  if (profile == "wubixsj")
-    return "五笔 新世纪";
-  return "五笔";
-}
 // The stored `scheme` value a scheme row selects, or null for every other row.
 inline const char *tray_menu_scheme(TrayMenuCommand command) {
   if (command == TrayMenuCommand::SelectQuanpin)
     return "quanpin";
   if (command == TrayMenuCommand::SelectShuangpin)
     return "shuangpin";
-  if (command == TrayMenuCommand::SelectWubi)
-    return "wubi";
-  if (command == TrayMenuCommand::SelectJapanese)
-    return "japanese";
-  if (command == TrayMenuCommand::SelectKorean)
-    return "korean";
-  if (command == TrayMenuCommand::SelectCantonese)
-    return "cantonese";
-  if (command == TrayMenuCommand::SelectZhuyin)
-    return "zhuyin";
-  if (command == TrayMenuCommand::SelectVietnamese)
-    return "vietnamese";
-  if (command == TrayMenuCommand::SelectTibetan)
-    return "tibetan";
-  if (command == TrayMenuCommand::SelectStroke)
-    return "stroke";
   return nullptr;
 }
 // 「输入方案」那一组单选行，托盘卡片和悬浮工具栏的切换输入方案按钮共用这一份：两处列出的方案、名字和勾选都一样，选中后都走 Server 同一条写偏好的路径。名字与 macOS 的方案菜单相同（日语、韩语、越南语）。只列出本版本提供的方案。缺词典的粤拼、注音和笔画在托盘的方案页显示为不可用；`omit_unavailable` 为真时（悬浮工具栏的方案菜单）不列出，与 macOS 的方案菜单一样只给能运行的方案。
@@ -213,15 +166,6 @@ tray_menu_scheme_items(const TrayMenuCapabilities &capabilities,
   scheme_row(TrayMenuCommand::SelectQuanpin, "全拼", true);
   scheme_row(TrayMenuCommand::SelectShuangpin,
              tray_menu_shuangpin_label(state.shuangpin_profile), true);
-  scheme_row(TrayMenuCommand::SelectWubi,
-             tray_menu_wubi_label(state.wubi_profile), true);
-  scheme_row(TrayMenuCommand::SelectJapanese, "日语", true);
-  scheme_row(TrayMenuCommand::SelectKorean, "韩语", true);
-  scheme_row(TrayMenuCommand::SelectCantonese, "粤拼", capabilities.cantonese);
-  scheme_row(TrayMenuCommand::SelectZhuyin, "注音", capabilities.zhuyin);
-  scheme_row(TrayMenuCommand::SelectVietnamese, "越南语", true);
-  scheme_row(TrayMenuCommand::SelectTibetan, "藏文", true);
-  scheme_row(TrayMenuCommand::SelectStroke, "笔画", capabilities.stroke);
   return items;
 }
 // 悬浮工具栏的右键菜单，行和顺序照搬 macOS 工具栏设置按钮的实用菜单（CreateMetasequoiaFloatingToolbarUtilityMenu）。打开设置、检查更新、帮助、关于和反馈都要设置窗口（检查更新在设置窗口的「关于」页里完成）；没有设置窗口时这几行显示为不可用。表情与符号打开系统自带的表情面板，访问官网和隐藏工具栏不依赖外壳，总是可用。
@@ -244,20 +188,12 @@ toolbar_utility_menu_items(const TrayMenuCapabilities &capabilities) {
   };
   row(TrayMenuCommand::OpenSystemEmoji, "表情与符号…", true);
   row(TrayMenuCommand::OpenSettings, "打开设置…", capabilities.settings);
-  row(TrayMenuCommand::CheckForUpdates, "检查更新…", capabilities.settings);
-  separator();
-  row(TrayMenuCommand::OpenPromotion, "宣传水杉输入法", true);
-  row(TrayMenuCommand::OpenWebsite, "访问 msime.app", true);
-  row(TrayMenuCommand::OpenHelp, "使用帮助…", capabilities.settings);
   row(TrayMenuCommand::OpenAbout, "关于" + capabilities.product_name + "…",
       capabilities.settings);
-  row(TrayMenuCommand::OpenFeedback, "问题反馈…", capabilities.settings);
   separator();
   row(TrayMenuCommand::HideFloatingToolbar, "隐藏悬浮状态栏", true);
   return items;
 }
-// 官网地址，与 macOS 工具栏菜单的「访问 msime.app」相同。
-inline constexpr const wchar_t *toolbar_website_url = L"https://msime.app/";
 // Shortcuts the TIP binds itself (KeyEventSink.cpp and the preserved keys in CompositionProcessorEngine.cpp); they are fixed, unlike the CN/EN key.
 inline constexpr const char *tray_menu_fullwidth_hint = "Ctrl + Shift + Space";
 inline constexpr const char *tray_menu_punctuation_hint = "Ctrl + .";
@@ -341,10 +277,6 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
     row(TrayMenuCommand::OpenTheme, "主题设置…", capabilities.settings, false);
     return items;
   }
-  const bool japanese = state.scheme == "japanese";
-  const bool korean = state.scheme == "korean";
-  const bool vietnamese = state.scheme == "vietnamese";
-  const bool tibetan = state.scheme == "tibetan";
   const bool language_known = state.chinese.has_value();
   // In the Engine's English mode the TIP may still report Chinese, and the toolbar shows English then too.
   const bool english =
@@ -352,13 +284,8 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
   header(capabilities.product_name);
   separator();
   // 与 macOS 输入菜单一样是「中文输入」「英文输入」。日语、韩语、越南语和藏文方案里第一行打的不是中文，所以照方案写成「日语输入」等，名字与方案菜单相同；macOS 不改这一行，Windows 有只提供这几种语言的版本，写「中文输入」会说错。粤拼、注音和笔画写的是中文。
-  row(TrayMenuCommand::SelectChinese,
-      japanese     ? "日语输入"
-      : korean     ? "韩语输入"
-      : vietnamese ? "越南语输入"
-      : tibetan    ? "藏文输入"
-                   : "中文输入",
-      language_known, language_known && !english, state.language_hint);
+  row(TrayMenuCommand::SelectChinese, "中文输入", language_known,
+      language_known && !english, state.language_hint);
   row(TrayMenuCommand::SelectEnglish, "英文输入", language_known, english);
   // Engine 的英文模式下「英文输入」一行照旧打勾（工具栏这时也显示英文），「英文候选模式」再标出是 Engine 的英文模式；TIP 在英文状态时它不勾，和 macOS 输入菜单一样。
   row(TrayMenuCommand::ToggleDedicatedEnglish, "英文候选模式",
@@ -378,8 +305,6 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
   row(TrayMenuCommand::ToggleChinesePunctuation, "中文标点",
       state.chinese_punctuation.has_value() && !state.punctuation_locked,
       state.chinese_punctuation.value_or(false), tray_menu_punctuation_hint);
-  row(TrayMenuCommand::ToggleTranslations, "显示译文", true,
-      state.translations);
   separator();
   // 输入方案和主题各是多选一，和 macOS 的两个子菜单一样各占一行，右侧写出当前的选择，点开换到那一页。
   std::string scheme_title;
@@ -395,24 +320,8 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
   // The host tools the shipped menu offered, kept reachable as one strip so the card still fits a small work area. 顺序与 macOS 输入菜单的同一组行相同：悬浮工具栏、表情、屏幕键盘、手写、语音。
   tool(TrayMenuCommand::ToggleFloatingToolbar, "工具栏", 0xE7C4, L"栏",
        capabilities.floating_toolbar, true, state.floating_toolbar);
-  tool(TrayMenuCommand::OpenEmojiPanel, "表情", 0xE76E, L"表",
-       capabilities.emoji_panel, false, false);
-  tool(TrayMenuCommand::OpenKeyboardPanel, "键盘", 0xE765, L"键",
-       capabilities.keyboard_panel, false, false);
-  tool(TrayMenuCommand::OpenHandwritingPanel, "手写", 0xE70F, L"写",
-       capabilities.handwriting_panel, false, false);
   separator();
-  // 云剪贴板和云词库紧接在表情所在的工具条之后，macOS 把它们排在表情面板之后、屏幕键盘之前；工具条放不下第六、七格，各占一行。云剪贴板面板像表情面板的剪贴板页一样把条目输入编辑器。
-  row(TrayMenuCommand::OpenCloudClipboard, "云剪贴板…",
-      capabilities.cloud_clipboard, false);
-  row(TrayMenuCommand::OpenCloudDictionary, "云词库…",
-      capabilities.cloud_dictionary, false);
-  // 今天有卡在等、没在组字、共享应用在场时才列出，没有就不占一行：这是被动的提醒，不是一个总在那里的入口。文案和条件与 macOS 输入菜单、Linux 菜单相同（common/VocabularyDueMenu.h）。
-  if (capabilities.vocabulary_panel)
-    if (auto label = vocabulary_due::menu_label(state.vocabulary_due, state.composing))
-      row(TrayMenuCommand::OpenVocabulary, std::move(*label), true, false);
-  // 设置应用的页面，与云剪贴板、云词库之间不另加分隔线：macOS 输入菜单这一组只在设置之前有一条分隔线，这里工具条之后已经有一条，再加一条只会让卡片在矮工作区里放不下。「水杉输入法设置…」「关于水杉输入法…」与 macOS 输入菜单的末两行相同，产品名按版本取。
-  row(TrayMenuCommand::OpenDictionary, "词库…", capabilities.settings, false);
+  // 设置应用的页面：「水杉输入法设置…」「关于水杉输入法…」，产品名按版本取。
   row(TrayMenuCommand::OpenSettings, capabilities.product_name + "设置…",
       capabilities.settings, false);
   row(TrayMenuCommand::OpenAbout, "关于" + capabilities.product_name + "…",

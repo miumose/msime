@@ -5,15 +5,12 @@
 namespace msime::windows {
 // The global maintenance shortcuts the shared settings page documents.
 //
-// These are advertised on the 快捷键 page for every platform, and Linux has
-// implemented all four for some time. On Windows none of them did anything, so
-// a user read four documented shortcuts and got silence from all of them.
+// 屏幕键盘入口已随该功能移除；其余三个快捷键保留。
 enum class MaintenanceAction : uint8_t {
   DeleteCandidate, // Ctrl+Shift+Alt+1..8, index in `slot`
   ClearCache,      // Ctrl+Shift+Alt+C
   Restart,         // Ctrl+Shift+Alt+R
   Stop,            // Ctrl+Shift+Alt+T
-  OpenScreenKeyboard, // Ctrl+Shift+Win+K
 };
 struct MaintenanceHotkey {
   MaintenanceAction action = MaintenanceAction::ClearCache;
@@ -29,10 +26,6 @@ struct MaintenanceHotkey {
 inline std::optional<MaintenanceHotkey>
 maintenance_hotkey(uint32_t vk, bool ctrl, bool shift, bool alt,
                    bool win = false) {
-  // Ctrl+Shift+Win+K opens the on-screen keyboard. It uses Win rather than Alt,
-  // so it is checked before the Alt-based group and must not be claimed by it.
-  if (ctrl && shift && win && !alt && vk == 'K')
-    return MaintenanceHotkey{MaintenanceAction::OpenScreenKeyboard, 0};
   if (!ctrl || !shift || !alt || win)
     return std::nullopt;
   // 1..8 only: the reference deletes candidates 1 through 8, and 9 and 0 are

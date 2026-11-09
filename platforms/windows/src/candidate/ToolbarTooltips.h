@@ -48,10 +48,10 @@ inline std::wstring toolbar_scheme_title(std::string_view scheme,
   return {};
 }
 
-// 工具栏按钮的悬停提示，文字与 macOS 工具栏的 toolTip / accessibilityLabel 一致：两态按钮说点了会切到哪一边，其余按钮说点了打开什么。`state` 与 toolbar_icon 的含义相同，还不知道时只给按钮的名字，不猜一个方向。`panels` 是共享应用在不在：不在时表情和屏幕键盘打开的是系统自带的面板，提示照实说。`product` 是这个版本的产品名。
+// 工具栏按钮的悬停提示，文字与 macOS 工具栏的 toolTip / accessibilityLabel 一致：两态按钮说点了会切到哪一边，其余按钮说点了打开什么。`state` 与 toolbar_icon 的含义相同，还不知道时只给按钮的名字，不猜一个方向。`product` 是这个版本的产品名。
 inline std::wstring toolbar_tooltip(int button, std::optional<bool> state,
                                     const ToolbarLanguageState &language,
-                                    std::wstring_view scheme_title, bool panels,
+                                    std::wstring_view scheme_title,
                                     std::wstring_view product) {
   switch (button) {
   case kToolbarLanguage: {
@@ -77,13 +77,6 @@ inline std::wstring toolbar_tooltip(int button, std::optional<bool> state,
     if (!state)
       return L"简繁切换";
     return *state ? L"切换到简体输出" : L"切换到繁体输出";
-  case kToolbarEmoji:
-    return panels ? L"打开水杉表情面板" : L"打开系统表情面板";
-  case kToolbarHandwriting:
-    return L"打开水杉手写识别板";
-  case kToolbarScreenKeyboard:
-    return panels ? L"打开水杉屏幕键盘" : L"打开系统屏幕键盘";
-    return L"开始或结束语音输入";
   case kToolbarSettings:
     return L"打开" + std::wstring(product) + L"设置";
   case kToolbarHide:

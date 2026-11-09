@@ -3,11 +3,8 @@
 #include "../../../common/HostApiString.h"
 #include "FloatingToolbarVisibilityPolicy.h"
 #include "InputSchemeTraits.h"
-#include "KeySoundPolicy.h"
 #include "LifecyclePolicy.h"
 #include "PredictionPolicy.h"
-#include "TypingEffectPolicy.h"
-#include "TypingEffectSignal.h"
 #include <ctime>
 #include <memory>
 #include <stdexcept>
@@ -100,7 +97,6 @@ FocusedSession::key(const FocusLease &lease, const FanyImeNamedpipeData &packet,
   gate_.with_active(lease, [&] {
     result = composer_->dispatch(session_, packet, lease.epoch, path, uiless,
                                  std::move(local_text));
-    publish_commit_feedback(result);
     attach_online_query(lease, result);
   });
   return result;
@@ -112,7 +108,6 @@ std::optional<PendingReply> FocusedSession::edit(const FocusLease &lease,
   std::optional<PendingReply> result;
   gate_.with_active(lease, [&] {
     result = composer_->edit(session_, packet, lease.epoch, style);
-    publish_commit_feedback(result);
     attach_online_query(lease, result);
   });
   return result;
@@ -127,7 +122,6 @@ std::optional<PendingReply> FocusedSession::basic_key(
   gate_.with_active(lease, [&] {
     result = composer_->basic_key(session_, packet, lease.epoch, style,
                                   std::move(local_text));
-    publish_commit_feedback(result);
     attach_online_query(lease, result);
   });
   return result;
@@ -146,20 +140,6 @@ std::optional<PendingReply> FocusedSession::toggle_character_set(
   });
   return result;
 }
-std::optional<PendingReply> FocusedSession::toggle_japanese(
-    const FocusLease &lease, const FanyImeNamedpipeData &packet, bool enabled,
-    const std::function<bool()> &persist) {
-  check_thread();
-  if (!prepared(lease))
-    return std::nullopt;
-  std::optional<PendingReply> result;
-  gate_.with_active(lease, [&] {
-    result = composer_->toggle_japanese(session_, packet, lease.epoch, enabled,
-                                        persist);
-    attach_online_query(lease, result);
-  });
-  return result;
-}
 std::optional<PendingReply>
 FocusedSession::navigate(const FocusLease &lease,
                          const FanyImeNamedpipeData &packet,
@@ -170,7 +150,6 @@ FocusedSession::navigate(const FocusLease &lease,
   std::optional<PendingReply> result;
   gate_.with_active(lease, [&] {
     result = composer_->navigate(session_, packet, lease.epoch, bindings);
-    publish_commit_feedback(result);
     attach_online_query(lease, result);
   });
   return result;
@@ -210,7 +189,6 @@ FocusedSession::select_candidate(const FocusLease &lease, uint64_t session,
                                          translation_page,
         (lease.transport.capabilities & FanyImeProtocol::CandidateContinuation) != 0,
         expanded_text);
-    publish_commit_feedback(result);
     attach_online_query(lease, result);
   });
   return result;
@@ -506,12 +484,8 @@ std::optional<PendingReply> FocusedSession::configured_key(
   gate_.with_active(lease, [&] {
     // 不论输入法收不收这个键（英文模式也算），都是用户在打字：空闲隐藏的工具栏据此回来。
     ServerKeyActivity::instance().note();
-    // 生命周期的一轮从这个键开始，排在引擎处理之前：先比较一次字段属性，变了先报；再报按键，核心出按键音、算按键特效，候选窗在界面线程上画，这里只发布打包好的值。英文模式下 Server 只回答按键、不接手，不报；快捷键组合和单独的修饰键没有按键类别，也不报。
+    // 生命周期的一轮从这个键开始，排在引擎处理之前：先比较一次字段属性，变了先报。按键音和打字特效已随音效包移除。
     refresh_field_traits();
-    if (session_.input_enabled())
-      if (const auto key_class = key_sound_class(packet))
-        publish_typing_effect(session_.key(
-            lifecycle_key(*key_class, (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0)));
     {
       // TIP 已经从自己的宿主会话把这次的上屏写进文档（韩文、注音、越南文、藏文，整句改字）：这次派发的上屏只能观察。本地回车（ReplyPath::LocalCommit）要等路由选定才知道，由 ReplyComposer::dispatch 自己打开。上屏音只来自 Server 这一个会话的核心，TIP 的会话不选择加入，所以同一次上屏不会响两遍。
       const CommitObserveOnly observe(session_, session_.input_enabled() && tip_writes_commits(session_.view()));
@@ -519,8 +493,7 @@ std::optional<PendingReply> FocusedSession::configured_key(
                                          bindings, std::move(local_text),
                                          word_binding);
     }
-    // 上屏音在派发时已经由核心出过，这里只画上屏特效；之后才构建在线查询，不给它们添延迟。
-    publish_commit_feedback(result);
+    // 上屏音和上屏特效已移除；之后才构建在线查询，不给它们添延迟。
     attach_online_query(lease, result);
   });
   return result;
@@ -535,38 +508,18 @@ void FocusedSession::set_field_traits(uint32_t traits) {
   tip_field_traits_ = traits & FanyImeFieldTraits::Reported;
   refresh_field_traits();
 }
-void FocusedSession::publish_typing_effect(uint32_t packed) {
-  publish_typing_effect_settings();
-  TypingEffectSignal::instance().publish(packed);
-}
-void FocusedSession::publish_commit_feedback(const std::optional<PendingReply> &reply) {
-  if (!reply)
-    return;
-  // 部分选词那一段还留在前缀里、没进文档（committed_text 为空），核心在 HOST_HOLDS_PIECES 下也不为它出声，这里同样不画，否则那次回复里为 0 的特效会把连击徽标清零；整段送出的那次再画。
-  if (!reply->committed_text)
-    return;
-  // 上屏不计连击，只报告当前状态；打上上屏标记，界面线程画加倍的火花和更长的闪光。
-  if (const auto effect = commit_feedback(reply->source.transition))
-    publish_typing_effect(typing_effect_mark_commit(*effect));
-}
-void FocusedSession::publish_typing_effect_settings() {
-  // 精简版不再读取核心的打字特效设置；信号保持默认值，候选窗因此不画特效。
-}
 bool FocusedSession::passthrough_key(uint64_t token, uint32_t key_class) {
   check_thread();
   // 只认此刻持有焦点的那次激活：令牌对不上的是已经离开的会话，或者别的线程。
   if (!token || !lease_ || lease_->token != token || !prepared(*lease_))
     return false;
-  bool sounded = false;
+  bool active = false;
   gate_.with_active(*lease_, [&] {
     ServerKeyActivity::instance().note();
-    // 英文模式不出声，和 Server 处理的键一样。交给应用的键没有自动重复：TIP 已经把它们滤掉了。
-    if (!session_.input_enabled())
-      return;
-    refresh_field_traits();
-    publish_typing_effect(session_.key(lifecycle_passthrough_key(key_class)));
-    sounded = true;
+    (void)key_class;
+    // 按键音已移除；这里只确认这个客户端仍持有焦点，TIP 照常把键交给应用。
+    active = session_.input_enabled();
   });
-  return sounded;
+  return active;
 }
 } // namespace msime::windows

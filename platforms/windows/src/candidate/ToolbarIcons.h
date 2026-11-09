@@ -7,7 +7,7 @@ namespace msime::windows {
 //
 // The four mode buttons - language, punctuation, full width and character set - are text, as on macOS, where they are the button titles 中/英/A/En/双/五/日/한/粤/注/越/ཀ/笔, 。or ., 全/半 and 简/繁 in the regular system font at 0.95 of the toolbar font size. They carry no codepoint and draw `fallback` in `toolbar_text_font` (or `family` when set) at `toolbar_glyph_scale`. The icon font's own 中/英/全/半/简/繁 glyphs are drawings of a different shape, not those characters, and Segoe Fluent Icons is missing on Windows 10 altogether.
 //
-// 功能按钮（方案、表情、手写、键盘、语音、设置）优先使用系统图标字体，字号取工具栏全字号。
+// 功能按钮（方案、设置）优先使用系统图标字体，字号取工具栏全字号。
 // Win7 没有 Fluent / MDL2，旧版 Windows 10 的 MDL2 也可能缺字形；悬浮栏此时使用
 // ToolbarVectorIcons.h 的原生线性图标。文字替代标签继续保留给其它使用方。
 struct ToolbarIcon {
@@ -30,11 +30,8 @@ enum ToolbarButton {
   kToolbarFullwidth = 1,
   kToolbarPunctuation = 2,
   kToolbarCharacterSet = 3,
-  kToolbarEmoji = 4,
-  kToolbarScreenKeyboard = 5,
   kToolbarSettings = 6,
-  // 手写沿用原来的 7。8 曾经是语音，9 曾经是「关于」，两个 id 都不再分配，免得旧布局指到别的按钮。
-  kToolbarHandwriting = 7,
+  // 4、5、7、8、9 曾经是表情、屏幕键盘、手写、语音和「关于」，这些按钮已随对应功能移除，编号不再分配，免得旧布局指到别的按钮。
   kToolbarHide = 10,
   // 切换输入方案，点开列出这个版本提供的方案。
   kToolbarInputScheme = 11,
@@ -117,15 +114,8 @@ inline ToolbarIcon toolbar_icon(int button, std::optional<bool> state,
       return unknown;
     // state is "traditional output is on".
     return *state ? ToolbarIcon{0, L"繁"} : ToolbarIcon{0, L"简"};
-  case kToolbarEmoji:
-    return {0xE76E, L"表"}; // 表
-  case kToolbarScreenKeyboard:
-    return {0xE765, L"键"}; // 键
   case kToolbarSettings:
     return {0xE713, L"设"}; // 设
-  // 手写和语音与托盘工具条用同一个字形和替代字。
-  case kToolbarHandwriting:
-    return {0xE70F, L"写"};
   // BulletedList，对应 macOS 的 list.bullet。
   case kToolbarInputScheme:
     return {0xE8FD, L"方"};

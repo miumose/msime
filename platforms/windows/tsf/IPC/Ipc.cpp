@@ -554,7 +554,7 @@ bool WritePipeHello(HANDLE hPipeHandle, UINT pipeRole)
                       FanyImeProtocol::OrderedPreferences |
                                        FanyImeProtocol::KeyboardCompositionCancel |
                                        FanyImeProtocol::GameHostCandidate | FanyImeProtocol::FieldTraits |
-                                       FanyImeProtocol::QuickPhraseCursor | FanyImeProtocol::JapaneseToggleShortcut);
+                                       FanyImeProtocol::QuickPhraseCursor);
         BOOL ret = WriteFile(hPipeHandle, &hello, sizeof(hello), &bytesWritten, NULL);
         // Never authorize keys from merely writing a hello. An old Server
         // without negotiation times out into the existing raw-input fallback.
@@ -963,11 +963,6 @@ bool SupportsOrderedPreferences()
            (negotiatedServerCapabilities & FanyImeProtocol::OrderedPreferences) != 0;
 }
 
-bool SupportsJapaneseToggleShortcut()
-{
-    return hPipe && hPipe != INVALID_HANDLE_VALUE &&
-           (negotiatedServerCapabilities & FanyImeProtocol::JapaneseToggleShortcut) != 0;
-}
 
 void Global::ResetForcedOverlayAnchor()
 {

@@ -199,7 +199,6 @@ void local_mode_trigger_tests(const std::string &options) {
   const auto chosen = press('1', '!', 1);
   require(chosen.source.transition.at("commit") == "6" &&
               chosen.committed_text == std::optional<std::string>("6") &&
-              !transition_counts_as_typing(chosen.source.transition) &&
               session.view().at("local_mode") == "none",
           "Shift+1 did not commit the expression result");
 
@@ -211,8 +210,7 @@ void local_mode_trigger_tests(const std::string &options) {
   press('R', 'r');
   press('Q', 'q');
   const auto command = press(0x20, ' ');
-  require(command.committed_text && !command.committed_text->empty() &&
-              !transition_counts_as_typing(command.source.transition),
+  require(command.committed_text && !command.committed_text->empty(),
           "Space did not commit the command row");
 
   // 拆字入口 C 允许字面符号退回普通组字；部件后的分隔符由 Engine 决定，空格上屏计入统计。
@@ -238,7 +236,6 @@ void local_mode_trigger_tests(const std::string &options) {
           "The chaizi mode did not take the apostrophe as a separator or did not find 焱");
   const auto picked = press(0x20, ' ');
   require(picked.committed_text == std::optional<std::string>("焱") &&
-              transition_counts_as_typing(picked.source.transition) &&
               session.view().at("local_mode") == "none",
           "Space did not commit the chaizi row");
 
@@ -349,86 +346,6 @@ int main(int argc, char **argv) {
         FanyImeProtocol::Negotiate(hello, FanyImeProtocol::RequiredCapabilities)
             .accepted,
         "Shared protocol negotiation failed");
-    {
-      // Ctrl+Shift+J：只在开关打开、中文状态、不在 Engine 英文模式时交给 persist，不改组字，回复不带帧（TIP 不读它）。
-      using namespace msime::windows;
-      FocusGate gate;
-      FocusedSession focused(gate, 42, options.dump());
-      PipeTicket ticket{42, {1, 2, 3}};
-      auto first = *gate.begin(ticket, 77);
-      require(focused.prepare(first.pending), "Focus preparation failed");
-      require(gate.acknowledge(first.pending, [] { return true; }),
-              "Synthetic queue-test fence failed");
-      FanyImeNamedpipeData packet{};
-      packet.event_type = FanyImePipeEventType::KeyEvent;
-      packet.client_id = 42;
-      packet.request_id = 2;
-      packet.keycode = 'J';
-      packet.wch = 'j';
-      packet.modifiers_down = 0b11;
-      require(FanyImeProtocol::IsJapaneseToggleShortcut(packet.keycode,
-                                                        packet.modifiers_down),
-              "Ctrl+Shift+J fixture is not the shortcut");
-      size_t japanese_persists = 0;
-      auto persist_japanese = [&] {
-        ++japanese_persists;
-        return true;
-      };
-      // Engine 自己的英文模式里 TIP 仍报告中文，Server 这一侧同样不切换。英文模式只在没有组字时打得开，所以先测它。
-      require(focused.set_dedicated_english(first.pending, true).has_value(),
-              "Dedicated English fixture failed");
-      auto dedicated = focused.toggle_japanese(first.pending, packet, true,
-                                               persist_japanese);
-      require(dedicated && !dedicated->encoded && japanese_persists == 0 &&
-                  focused.confirm(first.pending, packet.request_id),
-              "Dedicated English persisted a Japanese toggle");
-      require(focused.set_dedicated_english(first.pending, false).has_value(),
-              "Leaving dedicated English failed");
-      ++packet.request_id;
-      packet.keycode = 'N';
-      packet.wch = 'n';
-      packet.modifiers_down = 0;
-      require(focused.key(first.pending, packet, ReplyPath::Composition) &&
-                  focused.confirm(first.pending, packet.request_id) &&
-                  focused.view().at("editing_text") == "n",
-              "Japanese-toggle fixture did not compose");
-      const auto composing = focused.view().at("editing_text");
-      ++packet.request_id;
-      packet.keycode = 'J';
-      packet.wch = 'j';
-      packet.modifiers_down = 0b11;
-      auto disabled = focused.toggle_japanese(first.pending, packet, false,
-                                              persist_japanese);
-      require(disabled && !disabled->encoded && japanese_persists == 0 &&
-                  focused.confirm(first.pending, packet.request_id),
-              "Disabled Japanese toggle persisted a scheme");
-      ++packet.request_id;
-      auto enabled = focused.toggle_japanese(first.pending, packet, true,
-                                             persist_japanese);
-      require(enabled && !enabled->encoded && japanese_persists == 1 &&
-                  focused.confirm(first.pending, packet.request_id) &&
-                  focused.view().at("editing_text") == composing,
-              "Japanese toggle changed the composition");
-      ++packet.request_id;
-      auto rejected_toggle = focused.toggle_japanese(
-          first.pending, packet, true, [&] {
-            ++japanese_persists;
-            return false;
-          });
-      require(rejected_toggle && !rejected_toggle->encoded &&
-                  japanese_persists == 2 &&
-                  focused.confirm(first.pending, packet.request_id) &&
-                  focused.view().at("editing_text") == composing,
-              "A busy Japanese toggle changed the composition");
-      ++packet.request_id;
-      require(focused.set_input_enabled(first.pending, false),
-              "English-mode fixture failed");
-      auto english = focused.toggle_japanese(first.pending, packet, true,
-                                             persist_japanese);
-      require(english && !english->encoded && japanese_persists == 2 &&
-                  focused.confirm(first.pending, packet.request_id),
-              "English mode persisted a Japanese toggle");
-    }
     {
       using namespace msime::windows;
       FocusGate gate;

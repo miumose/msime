@@ -2,7 +2,6 @@
 #include "Private.h"
 #include "MetasequoiaIME.h"
 #include "CandidateListUIPresenter.h"
-#include "KeyPressStatisticsQueue.h"
 #include <debugapi.h>
 #include <cwchar>
 #include "fmt/xchar.h"
@@ -104,7 +103,6 @@ STDAPI CMetasequoiaIME::OnKillThreadFocus()
 {
     _backspaceHoldArmed = false;
     // The counts are per process and carry their own day, so any focus loss may hand them over, owner or not.
-    FlushKeyPressStatistics();
     if (!IsNamedpipeFocusStateOwner(this) || !Global::g_connected)
     {
         return S_OK;

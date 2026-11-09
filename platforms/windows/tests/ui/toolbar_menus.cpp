@@ -35,32 +35,24 @@ bool rejected(void (*action)()) {
 
 int main() {
   try {
-    // full 的能力：全部方案、产品名写明，测试在哪个版本的构建里都查同一组行。
+    // 精简版的能力：只提供全拼和双拼，产品名写明，测试在哪个版本的构建里都查同一组行。
     TrayMenuCapabilities all;
-    all.floating_toolbar = all.emoji_panel = all.handwriting_panel = true;
-    all.keyboard_panel = all.voice_input = all.settings = true;
-    all.cantonese = all.zhuyin = all.stroke = true;
-    all.schemes = scheme::all_schemes();
+    all.floating_toolbar = true;
+    all.settings = true;
+    all.schemes = scheme::OfferedSchemes{};
+    all.schemes.offered[scheme::Quanpin] = true;
+    all.schemes.offered[scheme::Shuangpin] = true;
     all.product_name = "水杉输入法";
     TrayMenuState state;
     state.scheme = "shuangpin";
     state.shuangpin_profile = "ziranma";
-    state.wubi_profile = "wubi98";
 
-    // 切换输入方案菜单列出本版本的全部方案，名字与托盘一致，正在用的方案打勾，选中的行就是写进偏好的方案。
+    // 切换输入方案菜单只列出全拼和双拼，名字与托盘一致，正在用的方案打勾，选中的行就是写进偏好的方案。
     {
       const auto schemes = tray_menu_scheme_items(all, state);
       const std::vector<std::pair<TrayMenuCommand, std::string>> expected{
           {TrayMenuCommand::SelectQuanpin, "全拼"},
-          {TrayMenuCommand::SelectShuangpin, "双拼（自然码）"},
-          {TrayMenuCommand::SelectWubi, "五笔 98"},
-          {TrayMenuCommand::SelectJapanese, "日语"},
-          {TrayMenuCommand::SelectKorean, "韩语"},
-          {TrayMenuCommand::SelectCantonese, "粤拼"},
-          {TrayMenuCommand::SelectZhuyin, "注音"},
-          {TrayMenuCommand::SelectVietnamese, "越南语"},
-          {TrayMenuCommand::SelectTibetan, "藏文"},
-          {TrayMenuCommand::SelectStroke, "笔画"}};
+          {TrayMenuCommand::SelectShuangpin, "双拼（自然码）"}};
       require(schemes.size() == expected.size());
       for (size_t index = 0; index < schemes.size(); ++index) {
         const auto &row = schemes[index];
@@ -72,15 +64,7 @@ int main() {
         require(tray_menu_closes_after(row.command));
       }
       require(tray_menu_geometry(schemes, TrayMenuMetrics{}).rows.size() == schemes.size());
-      // 缺词典的方案在托盘的方案页显示为不可用，而不是让它打出拼音；工具栏的方案菜单像 macOS 一样干脆不列出它，其余的行不变。
-      auto missing = all;
-      missing.zhuyin = false;
-      const auto without_zhuyin = tray_menu_scheme_items(missing, state);
-      require(!without_zhuyin[find(without_zhuyin, TrayMenuCommand::SelectZhuyin)].available);
-      const auto popup = tray_menu_scheme_items(missing, state, true);
-      require(popup.size() == expected.size() - 1);
-      for (const auto &row : popup)
-        require(row.command != TrayMenuCommand::SelectZhuyin && row.available);
+      // 悬浮工具栏的方案菜单像 macOS 一样只列出能运行的方案；两份都提供时与托盘的行相同。
       require(tray_menu_scheme_items(all, state, true).size() == expected.size());
       // 只提供部分方案的版本只列出它提供的。
       auto pinyin = all;
@@ -94,17 +78,15 @@ int main() {
       require(tray_menu_scheme_items(pinyin, state).empty());
     }
 
-    // 右键菜单照搬 macOS 设置按钮的实用菜单：行和顺序一致；缺设置窗口时依赖它的行（含检查更新）不可用，系统表情、官网和隐藏总是可用。
+    // 右键菜单：表情与符号、打开设置、关于、分隔线、隐藏悬浮状态栏；缺设置窗口时只有依赖它的两行不可用。
     {
       using K = TrayMenuRowKind;
       using C = TrayMenuCommand;
       const auto utility = toolbar_utility_menu_items(all);
       const std::vector<std::pair<K, C>> expected{
           {K::Item, C::OpenSystemEmoji}, {K::Item, C::OpenSettings},
-          {K::Item, C::CheckForUpdates}, {K::Separator, C::OpenSettings},
-          {K::Item, C::OpenPromotion}, {K::Item, C::OpenWebsite}, {K::Item, C::OpenHelp},
-          {K::Item, C::OpenAbout},       {K::Item, C::OpenFeedback},
-          {K::Separator, C::OpenSettings}, {K::Item, C::HideFloatingToolbar}};
+          {K::Item, C::OpenAbout},       {K::Separator, C::OpenSettings},
+          {K::Item, C::HideFloatingToolbar}};
       require(utility.size() == expected.size());
       for (size_t index = 0; index < utility.size(); ++index) {
         require(utility[index].kind == expected[index].first);
@@ -117,33 +99,24 @@ int main() {
       }
       require(utility[find(utility, C::OpenSystemEmoji)].label == "表情与符号…");
       require(utility[find(utility, C::OpenSettings)].label == "打开设置…");
-      require(utility[find(utility, C::CheckForUpdates)].label == "检查更新…");
-      require(utility[find(utility, C::OpenPromotion)].label == "宣传水杉输入法");
-      require(utility[find(utility, C::OpenWebsite)].label == "访问 msime.app");
-      require(utility[find(utility, C::OpenHelp)].label == "使用帮助…");
       require(utility[find(utility, C::OpenAbout)].label == "关于水杉输入法…");
-      require(utility[find(utility, C::OpenFeedback)].label == "问题反馈…");
       require(utility[find(utility, C::HideFloatingToolbar)].label == "隐藏悬浮状态栏");
-      // 使用帮助和问题反馈走设置窗口的路由，两者都落到「关于」页（帮助与反馈并进了「关于」）；检查更新和「关于」一样打开设置窗口的「关于」页，检查在那一页里完成；系统表情、官网和隐藏工具栏由 Server 自己处理，不经设置窗口或共享应用的路由。
-      const auto help = shell_surface_request(C::OpenHelp);
-      require(help && help->panel.empty() && help->page == "help");
-      require(shell_route_argument(*help) == L"settings:help");
-      const auto feedback = shell_surface_request(C::OpenFeedback);
-      require(feedback && feedback->panel.empty() && feedback->page == "feedback");
-      require(shell_route_argument(*feedback) == L"settings:feedback");
-      const auto updates = shell_surface_request(C::CheckForUpdates);
-      require(updates && updates->panel.empty() && updates->page == "about");
-      require(shell_route_argument(*updates) == L"settings:about");
-      for (const auto command : {C::OpenSystemEmoji, C::OpenPromotion, C::OpenWebsite, C::HideFloatingToolbar})
+      // 打开设置和关于走设置窗口的路由；系统表情和隐藏工具栏由 Server 自己处理。
+      const auto settings = shell_surface_request(C::OpenSettings);
+      require(settings && settings->panel.empty() && settings->page.empty());
+      require(shell_route_argument(*settings) == L"settings");
+      const auto about = shell_surface_request(C::OpenAbout);
+      require(about && about->panel.empty() && about->page == "about");
+      require(shell_route_argument(*about) == L"settings:about");
+      for (const auto command : {C::OpenSystemEmoji, C::HideFloatingToolbar})
         require(!shell_surface_request(command));
       require(tray_menu_geometry(utility, TrayMenuMetrics{}).rows.size() == utility.size());
       auto bare = all;
       bare.settings = false;
       const auto offline = toolbar_utility_menu_items(bare);
-      for (const auto command : {C::OpenSettings, C::CheckForUpdates, C::OpenHelp,
-                                 C::OpenAbout, C::OpenFeedback})
+      for (const auto command : {C::OpenSettings, C::OpenAbout})
         require(!offline[find(offline, command)].available);
-      for (const auto command : {C::OpenSystemEmoji, C::OpenPromotion, C::OpenWebsite, C::HideFloatingToolbar})
+      for (const auto command : {C::OpenSystemEmoji, C::HideFloatingToolbar})
         require(offline[find(offline, command)].available);
     }
 
@@ -163,7 +136,7 @@ int main() {
         (void)toolbar_menu_bounds(0, 100, 50, 0, 0, 100, 100, 96, TrayMenuSize{260.0, 100.0});
       }));
     }
-    std::cout << "Toolbar menus: scheme and utility rows match the tray and macOS\n";
+    std::cout << "Toolbar menus: scheme and utility rows match the reduced feature set\n";
   } catch (const std::exception &failure) {
     std::cerr << failure.what() << '\n';
     return 1;

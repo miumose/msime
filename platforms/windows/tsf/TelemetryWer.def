@@ -1,5 +1,0 @@
-LIBRARY MetasequoiaImeCrashWer
-EXPORTS
-    OutOfProcessExceptionEventCallback
-    OutOfProcessExceptionEventSignatureCallback
-    OutOfProcessExceptionEventDebuggerLaunchCallback

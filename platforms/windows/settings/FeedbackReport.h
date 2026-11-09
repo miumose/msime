@@ -20,28 +20,12 @@ inline constexpr std::wstring_view feedback_issues_url = L"https://github.com/me
 inline constexpr std::wstring_view feedback_qq_group = L"829919142";
 inline constexpr std::wstring_view feedback_telegram_url = L"https://t.me/msimegroup";
 
-// 输入方案 id 的中文名（`schemeTitle`）。未知的 id 原样返回。
+// 输入方案 id 的中文名（`schemeTitle`）。精简版只有全拼和双拼，未知的 id 原样返回。
 inline std::wstring_view feedback_scheme_title(std::wstring_view scheme) {
   if (scheme == L"quanpin")
     return L"全拼";
   if (scheme == L"shuangpin")
     return L"双拼";
-  if (scheme == L"wubi")
-    return L"五笔";
-  if (scheme == L"japanese")
-    return L"日语";
-  if (scheme == L"korean")
-    return L"韩语";
-  if (scheme == L"cantonese")
-    return L"粤拼";
-  if (scheme == L"zhuyin")
-    return L"注音";
-  if (scheme == L"vietnamese")
-    return L"越南语";
-  if (scheme == L"tibetan")
-    return L"藏文";
-  if (scheme == L"stroke")
-    return L"笔画";
   return scheme;
 }
 

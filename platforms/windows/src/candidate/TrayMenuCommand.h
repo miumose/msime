@@ -2,11 +2,9 @@
 
 namespace msime::windows {
 // What a tray menu row asks the Server to do. Kept apart from the menu model so the mode command mapping can name these without pulling in the menu's labels, which are UTF-8 text that only the menu targets compile with /utf-8.
+// 精简后的拼音输入法只保留输入状态、全拼/双拼、主题、悬浮工具栏和设置相关的行；云剪贴板、云词库、背单词、翻译、更新、反馈和手写、屏幕键盘等入口已随对应功能移除。
 enum class TrayMenuCommand {
   ToggleFloatingToolbar,
-  OpenEmojiPanel,
-  OpenHandwritingPanel,
-  OpenKeyboardPanel,
   OpenSettings,
   OpenAbout,
   // Input mode rows, sent to the focused TIP over the same worker protocol the floating toolbar uses.
@@ -19,34 +17,13 @@ enum class TrayMenuCommand {
   // 存储的 traditional_chinese_output，走工具栏简繁按钮用的同一个工作线程。
   ToggleTraditionalOutput,
   // Stored preferences the Server writes through the revisioned store.
-  ToggleTranslations,
   SelectQuanpin,
   SelectShuangpin,
-  SelectWubi,
-  SelectJapanese,
-  SelectKorean,
-  SelectCantonese,
-  SelectZhuyin,
-  SelectVietnamese,
-  SelectTibetan,
-  SelectStroke,
   // Settings pages.
   OpenTheme,
-  OpenDictionary,
-  // 悬浮工具栏右键菜单的几行，与 macOS 工具栏设置按钮的实用菜单一一对应：系统表情面板（Win+.）、检查更新、访问官网、使用帮助、问题反馈、隐藏悬浮状态栏（写回偏好）。
+  // 悬浮工具栏右键菜单的几行：系统表情面板（Win+.）和隐藏悬浮状态栏（写回偏好）。
   OpenSystemEmoji,
-  CheckForUpdates,
-  OpenWebsite,
-  OpenPromotion,
-  OpenHelp,
-  OpenFeedback,
   HideFloatingToolbar,
-  // 托盘卡片的「云剪贴板…」：共享应用的云剪贴板面板，焦点在密码框里时拒绝打开。
-  OpenCloudClipboard,
-  // 托盘卡片的「云词库…」：共享应用的云词库面板，与 macOS 输入菜单的同名一行打开同一个面板（cloud-dictionary 路由）。
-  OpenCloudDictionary,
-  // 托盘卡片的「背单词（今日待复习 N）…」：共享应用的背单词面板（vocabulary 路由），只在今天有卡在等时列出。
-  OpenVocabulary,
   // 主题页的一行，写存储的 global_theme；行的 value 是主题 id。
   SelectTheme,
   // 托盘卡片自己的翻页：输入方案页、主题页和返回主页。只在卡片里处理，从不交给 Server。

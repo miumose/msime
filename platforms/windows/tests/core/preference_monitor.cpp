@@ -40,7 +40,6 @@ void preference_monitor_tests(const std::string &options,
     {"brackets", true}, {"tab", false}, {"page_up_down", false}, {"arrows", false}};
   document["preferences"]["word_character"] = {{"enabled", true}, {"keys", "minus_equal"}};
   document["preferences"]["keybindings"]["toggle_character_set_ctrl_shift_f"] = false;
-  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = true;
   write(document.dump());
   FocusGate gate;
   InputQueue input(gate, 1, 1, options);
@@ -112,8 +111,6 @@ void preference_monitor_tests(const std::string &options,
             "Live word binding was not published or was reverted by stale settings");
     require(!state.character_set_shortcut_enabled(),
             "Live character-set shortcut setting was not published");
-    require(state.japanese_toggle_shortcut_enabled(),
-            "Live Japanese toggle shortcut setting was not published");
     // Tab 和 PageUp/PageDown 固定开启（preference_navigation），存着的关不起作用。
     require(!navigation.minus_equal && !navigation.comma_period && navigation.brackets &&
             navigation.tab && navigation.page_up_down && !navigation.arrows,
@@ -142,7 +139,6 @@ void preference_monitor_tests(const std::string &options,
   require(callbacks.load() == 2 && published_revision.load() == 3,
           "Published preference callback did not observe the new revision");
   document["revision"] = 4;
-  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = false;
   write(document.dump());
   monitor.wake();
   await([&] { return published_revision.load() == 4; });
@@ -165,7 +161,6 @@ void preference_monitor_tests(const std::string &options,
 
   // 用一分钟空闲间隔区分显式唤醒与正常轮询，不靠短间隔掩盖丢失通知。
   document["revision"] = 5;
-  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = true;
   write(document.dump());
   InputQueue awakened(gate, 1, 1, options);
   std::atomic<uint64_t> awakened_revision{0};
@@ -180,7 +175,6 @@ void preference_monitor_tests(const std::string &options,
   require(barrier && barrier->get() == InputTaskStatus::Completed,
           "Explicit wake setup did not drain the initial publication");
   document["revision"] = 6;
-  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = false;
   write(document.dump());
   long_poll.wake();
   await([&] { return awakened_revision.load() == 6; });

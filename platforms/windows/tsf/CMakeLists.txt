@@ -176,14 +176,6 @@ if(MSVC)
   target_compile_options(msime-tsf-punctuation-key-policy-test PRIVATE /utf-8)
 endif()
 add_test(NAME msime-tsf-punctuation-key-policy COMMAND msime-tsf-punctuation-key-policy-test)
-# 日语空格「変換」在 TIP 这边：哪些空格回执保留组字，回车什么时候上屏高亮候选。
-add_executable(msime-tsf-japanese-conversion-policy-test tests/input/japanese_conversion_policy.cpp)
-target_compile_features(msime-tsf-japanese-conversion-policy-test PRIVATE cxx_std_17)
-target_include_directories(msime-tsf-japanese-conversion-policy-test PRIVATE ../../../shared/contracts)
-add_test(NAME msime-tsf-japanese-conversion-policy COMMAND msime-tsf-japanese-conversion-policy-test)
-add_executable(msime-tsf-japanese-conversion-wiring-test tests/input/japanese_conversion_wiring.cpp)
-target_compile_features(msime-tsf-japanese-conversion-wiring-test PRIVATE cxx_std_17)
-add_test(NAME msime-tsf-japanese-conversion-wiring COMMAND msime-tsf-japanese-conversion-wiring-test ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(msime-tsf-candidate-navigation-reply-test tests/input/candidate_navigation_reply.cpp)
 target_compile_features(msime-tsf-candidate-navigation-reply-test PRIVATE cxx_std_17)
 target_include_directories(msime-tsf-candidate-navigation-reply-test PRIVATE ../../../shared/contracts ../../../crates/host-api/include)
@@ -203,10 +195,6 @@ add_test(NAME msime-tsf-reply-wait-policy COMMAND msime-tsf-reply-wait-policy-te
 add_executable(msime-tsf-pipe-recovery-policy-test tests/input/pipe_recovery_policy.cpp)
 target_compile_features(msime-tsf-pipe-recovery-policy-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-pipe-recovery-policy COMMAND msime-tsf-pipe-recovery-policy-test)
-add_executable(msime-tsf-korean-key-test tests/input/korean_key.cpp)
-target_compile_features(msime-tsf-korean-key-test PRIVATE cxx_std_17)
-target_include_directories(msime-tsf-korean-key-test PRIVATE ../../../crates/host-api/include)
-add_test(NAME msime-tsf-korean-key COMMAND msime-tsf-korean-key-test)
 # 任务栏模式图标：每个方案一个字，Caps Lock 和英文排在前面。
 add_executable(msime-tsf-mode-icon-policy-test tests/input/mode_icon_policy.cpp)
 target_compile_features(msime-tsf-mode-icon-policy-test PRIVATE cxx_std_17)
@@ -216,10 +204,6 @@ else()
   target_compile_options(msime-tsf-mode-icon-policy-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 endif()
 add_test(NAME msime-tsf-mode-icon-policy COMMAND msime-tsf-mode-icon-policy-test)
-add_executable(msime-tsf-host-composed-key-test tests/input/host_composed_key.cpp)
-target_compile_features(msime-tsf-host-composed-key-test PRIVATE cxx_std_17)
-target_include_directories(msime-tsf-host-composed-key-test PRIVATE ../../../crates/host-api/include)
-add_test(NAME msime-tsf-host-composed-key COMMAND msime-tsf-host-composed-key-test)
 # How the TIP routes the keys of the V, "/" and "@" modes, which must match the Server's EditPolicy.h.
 add_executable(msime-tsf-local-mode-key-policy-test tests/input/local_mode_key_policy.cpp)
 target_compile_features(msime-tsf-local-mode-key-policy-test PRIVATE cxx_std_17)
@@ -292,15 +276,6 @@ else()
   target_compile_options(msime-tsf-caps-lock-tap-test PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME msime-tsf-caps-lock-tap COMMAND msime-tsf-caps-lock-tap-test ${CMAKE_CURRENT_SOURCE_DIR})
-# Ctrl+Shift+J 在中文和日语之间切换：组合键和协商位逐条钉住，TSF 和 Server 里的接线检查源码。
-add_executable(msime-tsf-japanese-toggle-test tests/input/japanese_toggle.cpp)
-target_compile_features(msime-tsf-japanese-toggle-test PRIVATE cxx_std_17)
-if(MSVC)
-  target_compile_options(msime-tsf-japanese-toggle-test PRIVATE /W4 /WX)
-else()
-  target_compile_options(msime-tsf-japanese-toggle-test PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME msime-tsf-japanese-toggle COMMAND msime-tsf-japanese-toggle-test ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(msime-tsf-smart-punctuation-focus-wiring-test tests/input/smart_punctuation_focus_wiring.cpp)
 target_compile_features(msime-tsf-smart-punctuation-focus-wiring-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-smart-punctuation-focus-wiring COMMAND msime-tsf-smart-punctuation-focus-wiring-test ${CMAKE_CURRENT_SOURCE_DIR})
@@ -359,9 +334,6 @@ else()
 endif()
 enable_language(RC)
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/TelemetryWer.cmake")
-add_subdirectory(tests/capture_lifecycle)
-
 add_library(msime-tsf SHARED
   Candidate/EnumTfCandidates.cpp Candidate/SearchCandidateProvider.cpp
   Candidate/TipCandidateList.cpp Candidate/TipCandidateString.cpp
@@ -374,8 +346,7 @@ add_library(msime-tsf SHARED
   Global/Globals.cpp
   IME/ActiveLanguageProfileNotifySink.cpp IME/FunctionProviderSink.cpp
   IME/MetasequoiaIME.cpp IME/MetasequoiaIMEBaseStructure.cpp
-  IPC/Ipc.cpp IPC/PassthroughStatisticsQueue.cpp IPC/KeyPressStatisticsQueue.cpp
-  IPC/PassthroughKeySoundQueue.cpp
+  IPC/Ipc.cpp
   Key/KeyEventSink.cpp Key/KeyHandler.cpp Key/KeyHandlerEditSession.cpp
   Key/KeyStateCategory.cpp
   LanguageBar/LanguageBar.cpp
@@ -389,12 +360,10 @@ add_library(msime-tsf SHARED
   HostOptionsPaths.cpp
   HostConfiguration.cpp HostConfiguration.h AsyncSnapshotCache.h
   HostOptionsPaths.h PreparedHostOptions.cpp
-  TsfCrashCapture.h TsfCrashCapture.cpp
   IME/MetasequoiaIME.rc
   IME/MetasequoiaIME.def
   TsfHostDelayLoad.cpp
 )
-add_dependencies(msime-tsf msime-tsf-crash-wer)
 add_dependencies(msime-tsf-class-factory-test msime-tsf)
 
 find_package(fmt CONFIG REQUIRED)
@@ -425,11 +394,6 @@ if(MSVC)
   target_link_libraries(msime-tsf PRIVATE delayimp)
 endif()
 install(TARGETS msime-tsf
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-)
-install(TARGETS msime-tsf-crash-wer
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -484,26 +448,3 @@ target_include_directories(msime-tsf-commit-and-continue-payload-test PRIVATE .)
 target_compile_features(msime-tsf-commit-and-continue-payload-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-commit-and-continue-payload
   COMMAND msime-tsf-commit-and-continue-payload-test)
-add_executable(msime-tsf-passthrough-statistics-test
-  tests/passthrough_statistics.cpp)
-target_include_directories(msime-tsf-passthrough-statistics-test PRIVATE IPC)
-target_compile_features(msime-tsf-passthrough-statistics-test PRIVATE cxx_std_17)
-add_test(NAME msime-tsf-passthrough-statistics
-  COMMAND msime-tsf-passthrough-statistics-test)
-# 交给应用的键哪些出按键音、计入连击，按哪一类。
-add_executable(msime-tsf-passthrough-key-sound-test
-  tests/passthrough_key_sound.cpp)
-target_compile_features(msime-tsf-passthrough-key-sound-test PRIVATE cxx_std_17)
-if(MSVC)
-  target_compile_options(msime-tsf-passthrough-key-sound-test PRIVATE /W4 /WX /utf-8)
-else()
-  target_compile_options(msime-tsf-passthrough-key-sound-test PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME msime-tsf-passthrough-key-sound
-  COMMAND msime-tsf-passthrough-key-sound-test)
-add_executable(msime-tsf-key-press-statistics-test
-  tests/key_press_statistics.cpp)
-target_include_directories(msime-tsf-key-press-statistics-test PRIVATE IPC)
-target_compile_features(msime-tsf-key-press-statistics-test PRIVATE cxx_std_17)
-add_test(NAME msime-tsf-key-press-statistics
-  COMMAND msime-tsf-key-press-statistics-test)

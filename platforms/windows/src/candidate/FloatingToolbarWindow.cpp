@@ -71,7 +71,7 @@ std::vector<int> FloatingToolbarWindow::slots() const {
     for (const auto &button : image_.buttons) active.push_back(button.id);
     return active;
   }
-  return floating_toolbar_slots(layout_, MSIME_EDITION_HANDWRITING != 0);
+  return floating_toolbar_slots(layout_);
 }
 ToolbarRect FloatingToolbarWindow::cell(size_t index) const {
   return image_.active() ? image_.buttons.at(index).rect : toolbar_cell(index, metrics());
@@ -100,7 +100,7 @@ void FloatingToolbarWindow::update_image() {
   const std::string language = language_.caps_lock ? "caps" : !shown_->chinese ? "en"
       : language_.dedicated_english ? "en-candidate" : language_.mode == scheme::InputMode::Japanese ? "ja" : "cn";
   // 按共享键序请求，不用普通条标点在前的顺序，见 floating_toolbar_image_slots。
-  image_.update(floating_toolbar_image_slots(floating_toolbar_slots(layout_, MSIME_EDITION_HANDWRITING != 0)),
+  image_.update(floating_toolbar_image_slots(floating_toolbar_slots(layout_)),
       {language, shown_->fullwidth ? "full" : "half", shown_->chinese_punctuation ? "cn" : "en",
        shown_character_set_.value_or(false) ? "traditional" : "simplified", "", "", ""});
 }
@@ -119,13 +119,11 @@ void FloatingToolbarWindow::set_image_skin(nlohmann::json manifest, std::filesys
 ToolbarMetrics FloatingToolbarWindow::metrics() const {
   return toolbar_metrics(static_cast<double>(font_size_), true, layout_.show_logo);
 }
-// 只有设置和手写要靠外壳打开：设置按钮要设置窗口，手写按钮要共享应用。三个模式按钮、简繁、语音、切换输入方案和隐藏都在这个进程里处理；表情和屏幕键盘没有共享应用时打开系统自带的面板，所以也总是可用。
+// 只有设置要靠外壳打开：设置按钮要设置窗口。模式按钮、简繁、切换输入方案和隐藏都在这个进程里处理。
 bool FloatingToolbarWindow::usable(int button) const {
   switch (button) {
   case kToolbarSettings:
     return settings_available_;
-  case kToolbarHandwriting:
-    return panels_available_;
   default:
     return true;
   }
@@ -213,7 +211,7 @@ std::wstring FloatingToolbarWindow::button_name(int button,
       break;
     }
   }
-  return toolbar_tooltip(button, state, language_, scheme_title_, panels_available_,
+  return toolbar_tooltip(button, state, language_, scheme_title_,
                          MSIME_EDITION_DISPLAY_NAME);
 }
 void FloatingToolbarWindow::sync_accessibility(const std::optional<ModePresentation> &value) {
@@ -268,14 +266,8 @@ void FloatingToolbarWindow::run(size_t position, const ModePresentation &value, 
   }
   else if (slot == 3 && character_set_action_)
     character_set_action_();
-  else if (slot == 4 && emoji_action_)
-    emoji_action_();
-  else if (slot == 5 && keyboard_action_)
-    keyboard_action_();
   else if (slot == 6 && settings_action_)
     settings_action_();
-  else if (slot == kToolbarHandwriting && handwriting_action_)
-    handwriting_action_();
   else if (slot == kToolbarInputScheme && input_scheme_action_)
     input_scheme_action_(menu_anchor(position, x));
   else if (slot == 10 && hide_action_)

@@ -61,9 +61,6 @@ public:
   std::optional<PendingReply> toggle_character_set(
       const FocusLease &lease, const FanyImeNamedpipeData &packet,
       bool enabled, const std::function<bool(bool)> &persist);
-  std::optional<PendingReply> toggle_japanese(
-      const FocusLease &lease, const FanyImeNamedpipeData &packet,
-      bool enabled, const std::function<bool()> &persist);
   std::optional<PendingReply> edit(const FocusLease &lease,
       const FanyImeNamedpipeData &packet, TsfPreeditStyle style);
   std::optional<PendingReply> navigate(const FocusLease &lease,
@@ -113,12 +110,6 @@ private:
                            std::optional<PendingReply> &reply);
   // 每个键之前比较一次字段属性（TIP 报的加上此刻的全屏前台），变了先报给核心。
   void refresh_field_traits();
-  // 把一个键或一次上屏的打字特效交给候选窗，先发布会话的特效设置。
-  void publish_typing_effect(uint32_t packed);
-  // 回复里带着核心算好的上屏特效时（commit_feedback）画出来；Server 合成的上屏没有。
-  void publish_commit_feedback(const std::optional<PendingReply> &reply);
-  // 把会话解析好的特效设置和特效包的颜色、粒子数交给界面线程，在发布特效之前调用。
-  void publish_typing_effect_settings();
   FocusGate &gate_;
   uint64_t client_;
   const std::thread::id thread_ = std::this_thread::get_id();

@@ -96,62 +96,16 @@ add_executable(msimeui-demo WIN32
 target_link_libraries(msimeui-demo PRIVATE msimeui)
 target_compile_definitions(msimeui-demo PRIVATE MSIMEUI_ASSET_DIR=L\"${CMAKE_CURRENT_SOURCE_DIR}/assets\")
 
-add_executable(msimeui-emoji-panel WIN32
-    demos/msimeui-emoji-panel/EmojiPanel.cpp
-    demos/msimeui-emoji-panel/EmojiPanel.h
-    demos/msimeui-emoji-panel/main.cpp
-    demos/msimeui-emoji-panel/msimeui-emoji-panel.rc
-    demos/msimeui-emoji-panel/resource.h
-)
-
-target_link_libraries(msimeui-emoji-panel PRIVATE msimeui)
-
-add_executable(msimeui-keyboard-demo WIN32
-    demos/msimeui-keyboard-demo/KeyboardPanel.cpp
-    demos/msimeui-keyboard-demo/KeyboardPanel.h
-    demos/msimeui-keyboard-demo/main.cpp
-    demos/msimeui-keyboard-demo/msimeui-keyboard-demo.rc
-    demos/msimeui-keyboard-demo/resource.h
-)
-
-target_link_libraries(msimeui-keyboard-demo PRIVATE msimeui)
-
-option(MSIMEUI_BUILD_HANDWRITING_DEMO "Build the Windows SDK C++/WinRT handwriting demo" ON)
-if(MSIMEUI_BUILD_HANDWRITING_DEMO)
-add_executable(msimeui-handwriting-demo WIN32
-    demos/msimeui-handwriting-demo/HandwritingPanel.cpp
-    demos/msimeui-handwriting-demo/HandwritingPanel.h
-    demos/msimeui-handwriting-demo/main.cpp
-    demos/msimeui-handwriting-demo/msimeui-handwriting-demo.rc
-    demos/msimeui-handwriting-demo/resource.h
-)
-
-target_link_libraries(msimeui-handwriting-demo PRIVATE msimeui windowsapp.lib)
-install(TARGETS msimeui-handwriting-demo RUNTIME DESTINATION bin)
-
-# C++/WinRT needs C++20 coroutines. Under C++17 it falls back to
-# <experimental/coroutine>, which recent MSVC STL versions reject outright.
-target_compile_features(msimeui-handwriting-demo PRIVATE cxx_std_20)
-endif()
-install(TARGETS msimeui-demo msimeui-emoji-panel msimeui-keyboard-demo RUNTIME DESTINATION bin)
+install(TARGETS msimeui-demo RUNTIME DESTINATION bin)
 
 if(MINGW)
-    # All demos use wWinMain, not the narrow WinMain CRT entry point.
-    foreach(demo msimeui-demo msimeui-emoji-panel msimeui-keyboard-demo msimeui-handwriting-demo)
-        if(TARGET ${demo})
-            target_link_options(${demo} PRIVATE -municode)
-        endif()
-    endforeach()
+    # The demo uses wWinMain, not the narrow WinMain CRT entry point.
+    target_link_options(msimeui-demo PRIVATE -municode)
 endif()
 
 if(MSVC)
     target_compile_options(msimeui PRIVATE /W4 /permissive-)
     target_compile_options(msimeui-demo PRIVATE /W4 /permissive-)
-    target_compile_options(msimeui-emoji-panel PRIVATE /W4 /permissive-)
-    target_compile_options(msimeui-keyboard-demo PRIVATE /W4 /permissive-)
-    if(TARGET msimeui-handwriting-demo)
-        target_compile_options(msimeui-handwriting-demo PRIVATE /W4 /permissive-)
-    endif()
 endif()
 
 if(BUILD_TESTING)

@@ -78,15 +78,15 @@ int main() {
                 .known);
     // Rows that are not modes never reach the worker.
     for (auto command :
-         {TrayMenuCommand::ToggleFloatingToolbar, TrayMenuCommand::OpenEmojiPanel,
-          TrayMenuCommand::OpenHandwritingPanel, TrayMenuCommand::OpenKeyboardPanel,
-          TrayMenuCommand::ToggleVoiceInput, TrayMenuCommand::OpenSettings,
-          TrayMenuCommand::OpenAbout, TrayMenuCommand::ToggleTranslations,
-          TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
-          TrayMenuCommand::SelectWubi, TrayMenuCommand::SelectJapanese,
-          TrayMenuCommand::SelectKorean, TrayMenuCommand::OpenTheme,
-          TrayMenuCommand::OpenDictionary, TrayMenuCommand::OpenCloudDictionary,
-          TrayMenuCommand::OpenVocabulary}) {
+         {TrayMenuCommand::ToggleFloatingToolbar, TrayMenuCommand::OpenSettings,
+          TrayMenuCommand::OpenAbout, TrayMenuCommand::SelectQuanpin,
+          TrayMenuCommand::SelectShuangpin, TrayMenuCommand::OpenTheme,
+          TrayMenuCommand::OpenSystemEmoji,
+          TrayMenuCommand::HideFloatingToolbar,
+          TrayMenuCommand::ToggleDedicatedEnglish,
+          TrayMenuCommand::ToggleTraditionalOutput,
+          TrayMenuCommand::SelectTheme, TrayMenuCommand::ShowSchemes,
+          TrayMenuCommand::ShowThemes, TrayMenuCommand::ShowMain}) {
       assert(!tray(command, true, true, true, false).known);
       assert(!tray_menu_mode_row(command));
     }

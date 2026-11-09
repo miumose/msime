@@ -5,7 +5,6 @@ repo_root=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$repo_root"
 json_include=${1:?usage: check-cross.sh <nlohmann-json-include-root>}
 [[ -f "$json_include/nlohmann/json.hpp" ]] || { echo "nlohmann JSON headers required" >&2; exit 2; }
-winrt_include=${MSIME_WINRT_INCLUDE:-}
 # shared/contracts/msime_edition.h 要求选定一个版本；与 CMake 的缺省一样编 full。
 windows_includes=(-DMSIME_EDITION_FULL -Iplatforms/windows -Iplatforms/windows/common -Iplatforms/windows/src)
 for area in server ipc candidate voice clipboard input system; do
@@ -25,16 +24,6 @@ for arch in x86_64 i686; do
     platforms/windows/tests/runtime/focus_router.cpp -o "$output/focus-router.exe"
   "$compiler" -std=c++17 -Wall -Wextra -Werror "${windows_includes[@]}" -Ishared/contracts \
     platforms/windows/tests/core/main_frame.cpp -o "$output/main-frame.exe"
-  "$compiler" -std=c++17 -Wall -Wextra -Werror "${windows_includes[@]}" -Iplatforms/windows/msimeui/include \
-    -c platforms/windows/msimeui/demos/msimeui-keyboard-demo/KeyboardPanel.cpp -o "$output/keyboard-panel.o"
-  if [[ -n "$winrt_include" && -f "$winrt_include/winrt/Windows.Foundation.Collections.h" ]]; then
-    "$compiler" -std=c++20 -Wall -Wextra -Werror "${windows_includes[@]}" -Iplatforms/windows/msimeui/include -I"$winrt_include" \
-      -c platforms/windows/msimeui/demos/msimeui-handwriting-demo/HandwritingPanel.cpp -o "$output/handwriting-panel.o"
-  else
-    echo "Windows C++/WinRT headers unavailable; handwriting panel cross-check skipped"
-  fi
-  "$compiler" -std=c++17 -Wall -Wextra -Werror "${windows_includes[@]}" -Iplatforms/windows/msimeui/include -I"$json_include" \
-    -c platforms/windows/msimeui/demos/msimeui-emoji-panel/EmojiPanel.cpp -o "$output/emoji-panel.o"
   "$compiler" -std=c++17 -Wall -Wextra -Werror "${windows_includes[@]}" -Icrates/host-api/include \
     -Ishared/contracts -I"$json_include" -c platforms/windows/src/input/FocusedSession.cpp -o "$output/FocusedSession.o"
   "$compiler" -std=c++17 -Wall -Wextra -Werror "${windows_includes[@]}" \

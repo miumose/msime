@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-// 「输入」「快捷键」两页里与共享设置页逐字相同的列表、文案和判断：输入页的六个页内标签（`packages/ui/src/settings/input-tabs.ts`）、五笔码表版本（`input-scheme-details-section.tsx` 的 wubiProfileOptions）、五笔选词键的校验（`wubi-preferences.ts` 的 validWubiCandidateKeys）、中文输出的说明（`traditional-chinese-output-section.tsx`）、逐个模式的各行（`local-mode-options.ts`、`local-mode-preferences.ts`）、模糊音的四组规则（`fuzzy-pinyin-preferences.ts`）和按键速查里的翻页键（`candidate-paging-options.ts` 的 pagingKeys）。不依赖 Windows 和 WinRT 头文件，方便单独测试。
+// 「输入」「快捷键」两页里与共享设置页逐字相同的列表、文案和判断：输入页的六个页内标签（`packages/ui/src/settings/input-tabs.ts`）、中文输出的说明（`traditional-chinese-output-section.tsx`）、逐个模式的各行（`local-mode-options.ts`、`local-mode-preferences.ts`）、模糊音的四组规则（`fuzzy-pinyin-preferences.ts`）和按键速查里的翻页键（`candidate-paging-options.ts` 的 pagingKeys）。不依赖 Windows 和 WinRT 头文件，方便单独测试。
 namespace msime::settings::input {
 
 struct Tab {
@@ -28,64 +28,12 @@ inline constexpr std::array<Tab, 2> shortcut_tabs{{
     {L"reference", L"按键速查"},
 }};
 
-// 标点与翻译页的页内标签（共享页 `expressionTabs`）。
-inline constexpr std::array<Tab, 3> expression_tabs{{
-    {L"punctuation", L"标点设置"},
-    {L"gloss", L"候选释义"},
-    {L"providers", L"翻译服务"},
-}};
+// 标点与翻译页已随翻译功能移除，不再有页内标签。
 
-struct WubiProfile {
-  // `wubi_profile` 偏好的取值。
-  std::wstring_view id;
-  std::wstring_view title;
-};
-
-// 五笔码表版本，顺序就是「五笔方案」下拉框的顺序，名字与共享页 `wubiProfileOptions` 相同；五笔查码的结果表按同一顺序分列。
-inline constexpr std::array<WubiProfile, 3> wubi_profiles{{
-    {L"wubi86", L"86 五笔"},
-    {L"wubi98", L"98 五笔"},
-    {L"wubixsj", L"新世纪五笔"},
-}};
-
-// 存储的版本在 `wubi_profiles` 里的位置。不认识的值（更新的版本加的码表）按 86 五笔，与共享偏好库读到不认识的值时一样，下拉框和查码的「（当前）」不会落空或标错。
-inline std::size_t wubi_profile_index(std::wstring_view id) {
-  for (std::size_t index = 0; index < wubi_profiles.size(); ++index)
-    if (wubi_profiles[index].id == id)
-      return index;
-  return 0;
-}
-
-// 五笔选词键的一个键：一个英文标点，即 ASCII 的 ! 到 /、: 到 @、[ 到 `、{ 到 ~（共享页的正则 `^[!-/:-@[-`{-~]$`）。
-inline bool wubi_candidate_key(std::wstring_view key) {
-  if (key.size() != 1)
-    return false;
-  const wchar_t c = key[0];
-  return (c >= L'!' && c <= L'/') || (c >= L':' && c <= L'@') || (c >= L'[' && c <= L'`') ||
-         (c >= L'{' && c <= L'~');
-}
-
-// 两个键各是一个英文标点并且不同；与翻页、以词定字的冲突由共享偏好库在保存时检查。
-inline bool valid_wubi_candidate_keys(std::wstring_view second, std::wstring_view third) {
-  return wubi_candidate_key(second) && wubi_candidate_key(third) && second != third;
-}
-
-// 「自定义选词键」一行的说明：键有效时说怎么选，无效时换成提示。
-inline std::wstring_view wubi_candidate_keys_description(bool valid) {
-  return valid ? L"使用两个不同的英文标点；请选择未用于翻页或以词定字的键。"
-               : L"请输入两个不同的单个英文标点。";
-}
-
-// 「中文输出」一行的说明，随选项和方案变：粤拼、注音直接输出繁体，笔画按所选的字原样输出，都不受这个选项影响。Windows 不认繁体变体（`HostCapabilities.traditional_chinese_variants` 目前 Linux 与 macOS 为真），只有简体和标准繁体两项。
-inline std::wstring chinese_output_description(bool traditional, std::wstring_view scheme) {
-  std::wstring description = traditional
-                                 ? L"将提交的简体中文转换为繁体中文（OpenCC 标准繁体）"
-                                 : L"按简体中文提交";
-  if (scheme == L"cantonese" || scheme == L"zhuyin")
-    description += L"。粤拼与注音直接输出繁体，此选项不影响它们";
-  else if (scheme == L"stroke")
-    description += L"。笔画按所选的字原样输出，此选项不影响它";
-  return description;
+// 「中文输出」一行的说明，随选项变：只有简体和标准繁体两项。
+inline std::wstring chinese_output_description(bool traditional) {
+  return traditional ? L"将提交的简体中文转换为繁体中文（OpenCC 标准繁体）"
+                     : L"按简体中文提交";
 }
 
 struct LocalMode {
@@ -100,7 +48,7 @@ struct LocalMode {
 };
 
 // 逐个模式的各行，标题和说明与共享页 `localModeRows`、`triggerModeRows`、`mentionPlacesRow` 相同，顺序也相同。Windows 是路由 V、/、@ 的宿主（`plugin_triggers`），也能编辑 @ 名单（插件页），所以三行和「@ 地名」都列出。「组字后按 / 转超级简拼」（#10860）只在原生设置里有：共享页只修缺陷、不加新设置。
-inline constexpr std::array<LocalMode, 14> local_modes{{
+inline constexpr std::array<LocalMode, 13> local_modes{{
     {L"quick_phrase", L"快捷短语(K 模式)", L"中文模式下按 Shift+K，再输入编码即可调用快捷短语", true, true},
     {L"date_time", L"日期与时间快捷输入(T 模式)",
      L"中文模式下按 Shift+T，再输入 rq / riqi / date 输入日期，sj / shijian / time 输入时间，xq / xingqi / week 输入星期，nl / nongli / yinli 输入农历。打开时，拼音（含九键）直接输入 riqi / rq、shijian / sj、xingqi / xq、nongli / nl，日期、时间、星期、农历也会排在对应的词后面",
@@ -118,8 +66,6 @@ inline constexpr std::array<LocalMode, 14> local_modes{{
      true, false},
     {L"temporary_english", L"临时英文(Y 模式)",
      L"中文模式下按 Shift+Y，之后按英文处理。空格上屏当前输入；数字选词；上屏后回到中文", true, true},
-    {L"temporary_japanese", L"临时日语(R 模式)",
-     L"中文模式下按 Shift+R，之后按日语罗马字处理。空格上屏首选；数字选词；上屏后回到中文", true, true},
     {L"chaizi", L"拆字反查(C 模式)",
      L"中文模式下按 Shift+C，再输入字的各个部件的拼音，例如 huohuohuo 得 焱、nvzi 得 好。部件之间可以用 ' 分隔，ü 用 v。空格上屏；数字选词",
      false, true},
@@ -127,7 +73,7 @@ inline constexpr std::array<LocalMode, 14> local_modes{{
      L"中文模式下按 Shift+V，再输入算式（如 1+2*3）、数字（123 可转为一百二十三、壹佰贰拾叁或金额）或日期（2026.10.1）。空格上屏；Shift+数字选词；上屏内容不参与学习和打字统计",
      false, true},
     {L"command", L"指令(/ 模式)",
-     L"中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期、nl 农历、fy 翻译（fy 后输入英文，' 分隔单词，首选为中文译文），以及「插件」页启用的指令表。空格上屏；数字选词",
+     L"中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期、nl 农历。空格上屏；数字选词",
      false, false},
     {L"mention", L"@ 名字与地点(@ 模式)",
      L"中文标点下没有输入时按 @，再输入拼音或首字母，从「插件」页的 @ 名单中选择。空格上屏；数字选词",
@@ -137,16 +83,9 @@ inline constexpr std::array<LocalMode, 14> local_modes{{
      false, false},
 }};
 
-// 没有选翻译服务时，「指令(/ 模式)」的说明后面补的一句（共享页 `commandTranslationNotice`）。
-inline constexpr std::wstring_view command_translation_notice =
-    L"fy 翻译需要先在「标点与翻译 → 候选词翻译」选择翻译服务，目前未选择，fy 不会出结果。";
-
-// 某个模式这一行的说明：`translation_service` 为假时指令模式补上上面那句。
-inline std::wstring local_mode_description(LocalMode const &mode, bool translation_service) {
-  std::wstring description(mode.description);
-  if (mode.id == L"command" && !translation_service)
-    description += L"。" + std::wstring(command_translation_notice);
-  return description;
+// 某个模式这一行的说明。翻译功能已移除，指令模式不再有需要补写的提示。
+inline std::wstring local_mode_description(LocalMode const &mode) {
+  return std::wstring(mode.description);
 }
 
 // 这一行变不变灰（共享页 localModeControlState）：「@ 地名」在 @ 模式关着时变灰；「组字后按 / 转超级简拼」在超级简拼关着时变灰；Shift+字母进入的模式在总开关关着时变灰。值都不动。

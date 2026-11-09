@@ -40,8 +40,6 @@ bool MarkNamedpipeSessionDirtyForOwner(_In_ const void *owner);
 bool EnsureNamedpipeFocusSessionActivated();
 bool SupportsQuickPhraseCursor();
 bool SupportsCharacterSetShortcut();
-// Server 处理 Ctrl+Shift+J 中日切换（协商到 FanyImeProtocol::JapaneseToggleShortcut）。
-bool SupportsJapaneseToggleShortcut();
 bool SupportsGroupedPanelKeys();
 bool SupportsOrderedPreferences();
 bool SupportsGameHostCandidate();

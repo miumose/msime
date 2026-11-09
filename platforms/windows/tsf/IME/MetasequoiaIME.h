@@ -9,7 +9,6 @@
 #include "Ipc.h"
 #include "JapaneseConversionPolicy.h"
 #include "../../../../shared/input/CapsLockTap.h"
-#include "../TsfCrashCapture.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -347,10 +346,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     bool _QueueSmartPunctuationRewrite(WCHAR replacement);
     bool _QueueRepeatedSmartPunctuationReplacement(WCHAR wch);
     void _NoteKeyForSmartPunctuation(UINT code, WCHAR wch, bool isEaten);
-    void _NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled);
-    void _NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam);
     // wch 是分类时布局按出的字符，用来认出 AltGr 打字（见 Global::IsAltGrCharacter）。
-    void _NotePassthroughKeySound(WPARAM wParam, LPARAM lParam, WCHAR wch);
     // 记下当前字段的属性（停用的键盘或空上下文、安全桌面算 SECURE，提权进程算 ELEVATED），下一次发给 Server 的按键或状态快照之前、属性变了时先报（NoteFieldTraitsForServer）。只是转述给 Server：这个 TIP 自己的宿主会话从不调用生命周期的任何 FFI。
     void _NoteFieldTraitsForServer();
     void _ResetSmartPunctuationHistory();
@@ -756,15 +752,6 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     void _ForgetPrediction();
 
     // Last smart-punctuation commit, used to detect a backspace rejection.
-    // The key event last counted by _NotePassthroughStatistics; a host can query the same event more than once.
-    UINT _passthroughStatsVirtualKey = 0;
-    LONG _passthroughStatsMessageTime = 0;
-    // The key press last counted by _NoteKeyPressStatistics (scan code plus extended bit) and its message time; the Test and Key probes of one press share both.
-    UINT _keyPressStatsKey = 0;
-    LONG _keyPressStatsMessageTime = 0;
-    // _NotePassthroughKeySound 上一次报给 Server 的按下（扫描码加扩展位）和它的消息时间：同一次按下可能被探测不止一次。
-    UINT _passthroughSoundKey = 0;
-    LONG _passthroughSoundMessageTime = 0;
     WCHAR _smartPunctuationKey = 0;
     WCHAR _smartPunctuationPrecedingChar = 0;
     bool _smartPunctuationCommittedAscii = false;
@@ -918,7 +905,6 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     uint64_t _deferredKeyFocusGeneration;
     bool _deferredKeyDrainPosted;
     bool _serverUnavailableFallbackActive;
-    std::unique_ptr<msime::tsf::TsfCrashCapture> _crashCapture;
 
     // True while the current Backspace hold began inside a composition.
     bool _backspaceHoldArmed;
