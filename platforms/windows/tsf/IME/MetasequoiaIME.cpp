@@ -527,8 +527,6 @@ CMetasequoiaIME::CMetasequoiaIME()
     _deferredKeyDrainPosted = false;
     _serverUnavailableFallbackActive = false;
     _backspaceHoldArmed = false;
-    _passthroughStatsVirtualKey = 0;
-    _passthroughStatsMessageTime = 0;
     _shiftHotkeyArmed = false;
     _ctrlHotkeyArmed = false;
     _staleModifierMaskAfterFocusLoss = 0;
@@ -552,7 +550,6 @@ thread_local CMetasequoiaIME *CMetasequoiaIME::_bareShiftHookOwner = nullptr;
 
 CMetasequoiaIME::~CMetasequoiaIME()
 {
-    _crashCapture.reset();
     _UninitBareShiftKeyboardHook();
     _ClearDeferredKeyDowns();
     // Deactivate normally owns the unbind.  Keep this owner-aware fallback for
@@ -1727,7 +1724,6 @@ ExitError:
 
 STDAPI CMetasequoiaIME::Deactivate()
 {
-    _crashCapture.reset();
     // The flush runs on the thread pool under its own loader reference, so it survives this tip going away. It is deliberately not waited for: TSF calls Deactivate the same way for a profile switch as for a closing thread and gives no exit signal to tell them apart, so a wait would stall every ordinary deactivation. A process that exits before the drain finishes loses at most the presses since the last focus-loss flush, capped by the 256-press and 30-second triggers.
     _SyncHostContextFocus(nullptr);
     _UninitBareShiftKeyboardHook();
