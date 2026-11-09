@@ -157,10 +157,6 @@ $tsfArm64Release = Join-Path $tsfArm64Directory 'MetasequoiaImeTsf.dll'
 $tsfArm64Pdb = Join-Path $tsfArm64Directory 'MetasequoiaImeTsf.pdb'
 $arm64HostDllName = [IO.Path]::GetFileNameWithoutExtension($hostDllName) + '_arm64.dll'
 $tsfArm64Host = Join-Path $tsfArm64Directory $arm64HostDllName
-$werHelperName = 'MetasequoiaImeCrashWer.dll'
-$tsf32WerHelper = Join-Path (Split-Path -Parent $tsf32Release) $werHelperName
-$tsf64WerHelper = Join-Path (Split-Path -Parent $tsf64Release) $werHelperName
-$tsfArm64WerHelper = Join-Path $tsfArm64Directory $werHelperName
 $tsf32Host = Join-Path (Split-Path -Parent $tsf32Release) $hostDllName
 $tsf64Host = Join-Path (Split-Path -Parent $tsf64Release) $hostDllName
 $factoryConfig = Join-Path $PSScriptRoot 'config.default.toml'
@@ -196,10 +192,8 @@ if ($DesktopPreviewExecutable -and -not (Test-Path -LiteralPath $previewSource -
 Assert-PathExists -LiteralPath $serverRelease -Description 'Server Release 输出目录'
 Assert-PathExists -LiteralPath (Join-Path $serverRelease 'MetasequoiaImeWatchdog.exe') -Description 'Watchdog Release EXE'
 Assert-PathExists -LiteralPath $tsf32Release -Description '32 位 TSF Release DLL'
-Assert-PathExists -LiteralPath $tsf32WerHelper -Description '32 位 TSF 的 WER helper'
 if ($true) {
     Assert-PathExists -LiteralPath $tsf64Release -Description '64 位 TSF Release DLL'
-    Assert-PathExists -LiteralPath $tsf64WerHelper -Description '64 位 TSF 的 WER helper'
 }
 if ($true) {
 Assert-PathExists -LiteralPath $tsf32Pdb -Description '32 位 TSF Release PDB'
@@ -207,7 +201,6 @@ Assert-PathExists -LiteralPath $tsf64Pdb -Description '64 位 TSF Release PDB'
 Assert-PathExists -LiteralPath $tsfArm64Release -Description 'Arm64X TSF Release DLL'
 Assert-PathExists -LiteralPath $tsfArm64Pdb -Description 'Arm64X TSF Release PDB'
 Assert-PathExists -LiteralPath $tsfArm64Host -Description "Arm64X TSF 的 $arm64HostDllName"
-Assert-PathExists -LiteralPath $tsfArm64WerHelper -Description 'Arm64X TSF 的 WER helper'
 }
 foreach ($hostDll in @($tsf32Host) + @($tsf64Host)) {
     if (-not (Test-Path -LiteralPath $hostDll -PathType Leaf)) {
@@ -311,7 +304,7 @@ $targetServer = Join-Path $PackageDirectory 'server_exe'
 $targetTsf = Join-Path $PackageDirectory 'tsf_dll'
 
 if ($Light) {
-    Write-Host '轻量模式：跳过词库、辅助码和出厂配置，刷新 TSF、Server 与 Tauri。'
+    Write-Host '轻量模式：跳过词库、辅助码和出厂配置，刷新 TSF、Server 与设置窗口。'
     New-Item -ItemType Directory -Path $targetAppData -Force | Out-Null
 }
 else {
@@ -328,10 +321,20 @@ else {
 
 $targetAudios = Join-Path $targetAppData 'audios'
 Copy-DirectoryContents -Source $audioSource -Destination $targetAudios
-# 内置音效包，由 `scripts/generate_sound_packs.py` 合成。Server 把 `DataDir\sound-packs` 作为内置包根目录告诉 client-services；已安装的包放在 `DataDir\plugins` 下，那是用户状态。
+# 内置音效包由 `scripts/generate_sound_packs.py` 合成，可选：没有生成时安装包不带内置音效，
+# 用户仍可在设置里导入自己的音效包。
+$soundPacksSource = Join-Path $RepoRoot 'resources/sound-packs'
 $targetSoundPacks = Join-Path $targetAppData 'sound-packs'
-Reset-Directory -LiteralPath $targetSoundPacks
-Copy-DirectoryContents -Source (Join-Path $RepoRoot 'resources/sound-packs') -Destination $targetSoundPacks
+if (Test-Path -LiteralPath $targetSoundPacks) {
+    Remove-Item -LiteralPath $targetSoundPacks -Recurse -Force
+}
+if (Test-Path -LiteralPath $soundPacksSource -PathType Container) {
+    Reset-Directory -LiteralPath $targetSoundPacks
+    Copy-DirectoryContents -Source $soundPacksSource -Destination $targetSoundPacks
+}
+else {
+    Write-Host "未找到内置音效包（$soundPacksSource），安装包不带内置音效"
+}
 
 # Server Release 输出整体复制，但测试程序及其 PDB 绝不能进入安装包。其他 PDB 照常暂存在对应 EXE 旁边，供发布流程打成单独的符号包；msime_setup.iss 不把 PDB 和 .ilk 装到用户机器上。
 Reset-Directory -LiteralPath $targetServer
@@ -568,7 +571,7 @@ Get-ChildItem -LiteralPath $targetServer -Recurse -File |
     Remove-Item -Force
 # CI 里 Server 输出目录同时也是 x64 TIP 的构建目录。TIP 和它的符号暂存在 tsf_dll\64 下，只从版本目录加载；宿主 DLL 和 TIP 的运行时 DLL 也从同一份 tsf_dll\64 进入 Server 目录（msime_setup.iss），所以它们都不重复暂存。Build-Client.ps1 也把宿主 DLL 的 PDB 留在这里；Collect-Symbols.ps1 直接从构建输出取它打进符号包，所以它完全不暂存。
 $sharedRemoval = @($hostDllName,'msime_host_api.pdb') + @($tsf64Dependencies | ForEach-Object { Split-Path -Leaf $_ })
-foreach ($name in @('MetasequoiaImeTsf.dll', 'MetasequoiaImeTsf.pdb', $werHelperName, 'MetasequoiaImeCrashWer.pdb') + $sharedRemoval) {
+foreach ($name in @('MetasequoiaImeTsf.dll', 'MetasequoiaImeTsf.pdb') + $sharedRemoval) {
     $staged = Join-Path $targetServer $name
     if (Test-Path -LiteralPath $staged -PathType Leaf) { Remove-Item -LiteralPath $staged -Force }
 }
@@ -588,8 +591,8 @@ Copy-Item -LiteralPath $tsf64Release -Destination $targetTsf64 -Force
 Copy-Item -LiteralPath $tsf64Pdb -Destination $targetTsf64 -Force
 Copy-Item -LiteralPath $tsf32Host -Destination $targetTsf32 -Force
 Copy-Item -LiteralPath $tsf64Host -Destination $targetTsf64 -Force
-# Arm64X TIP 的 ARM64EC 那一半导入 x64 宿主，它由 tsf_dll\64 那一份装进同一个版本目录；这里放 TIP、WER helper 和 ARM64 宿主，均静态链接 C 运行时。
-Copy-Item -LiteralPath $tsfArm64Release, $tsfArm64Pdb, $tsfArm64Host, $tsfArm64WerHelper -Destination $targetTsfArm64 -Force
+# Arm64X TIP 的 ARM64EC 那一半导入 x64 宿主，它由 tsf_dll\64 那一份装进同一个版本目录；这里放 TIP 和 ARM64 宿主，均静态链接 C 运行时。
+Copy-Item -LiteralPath $tsfArm64Release, $tsfArm64Pdb, $tsfArm64Host -Destination $targetTsfArm64 -Force
 # Build-Client 把检查过架构的发布依赖收集到 TIP 旁边；只复制上面列出的那些，绝不复制共用 x64 目录里的其余文件。
 foreach ($dependency in $tsf32Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf32 -Force }
 foreach ($dependency in $tsf64Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf64 -Force }

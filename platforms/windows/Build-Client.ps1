@@ -1,4 +1,4 @@
-# Run from a Windows MSVC build environment with the MSVC ARM64 and ARM64EC build tools and prebuilt native dependency prefixes. Unless -RustOutputs names the Rust half already built by Build-RustOutputs.ps1, it builds that first, which also needs the x64, x86 and ARM64 Rust MSVC targets, pnpm and clang on PATH (ring builds its ARM64 assembly with it). This script never signs or installs.
+# Run from a Windows MSVC build environment with the MSVC ARM64 and ARM64EC build tools and prebuilt native dependency prefixes. Unless -RustOutputs names the Rust half already built by Build-RustOutputs.ps1, it builds that first, which also needs the x64, x86 and ARM64 Rust MSVC targets and clang on PATH (ring builds its ARM64 assembly with it). This script never signs or installs.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$X64Dependencies,
@@ -16,8 +16,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# Keep direct development builds on the checked-in Tauri version. Installation
-# builds supply one numeric release version for packaging and desktop metadata.
+# Keep direct development builds on the checked-in version. Installation builds
+# supply one numeric release version for packaging and settings metadata.
 if ($TargetVersion -ne '' -and
     ($TargetVersion -notmatch '^(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})$' -or
      @($TargetVersion.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count -ne 0)) {
@@ -53,7 +53,6 @@ foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
         throw "Missing Client build source: $relative"
     }
 }
-# The on-device speech runtime staged beside the Server; Prepare-PackageFiles.ps1 and install-smoke.ps1 name the same three files.
 $previousPrefix = $env:CMAKE_PREFIX_PATH
 # The ARM64 host DLL that the native half of the Arm64X TIP imports (edition_windows.py arm64_host_dll): it sits beside the x64 host in the same version directory.
 $arm64HostDll = [IO.Path]::GetFileNameWithoutExtension($hostDll) + '_arm64.dll'
@@ -158,7 +157,7 @@ try {
         $prefix = if ($arch -eq 'x64') { $X64Dependencies } else { $X86Dependencies }
         & (Join-Path $PSScriptRoot 'Copy-RuntimeDependencies.ps1') `
             -DependencyPrefix $prefix -Destination $bin -Architecture $arch
-        foreach ($dll in @('MetasequoiaImeTsf.dll', 'MetasequoiaImeCrashWer.dll', $hostDll)) {
+        foreach ($dll in @('MetasequoiaImeTsf.dll', $hostDll)) {
             & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $bin $dll) -Architecture $arch -Kind dll
         }
         if ($arch -eq 'x64') {
@@ -169,7 +168,6 @@ try {
         }
     }
     & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $arm64Bin 'MetasequoiaImeTsf.dll') -Architecture arm64x -Kind dll
-    & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $arm64Bin 'MetasequoiaImeCrashWer.dll') -Architecture arm64x -Kind dll
     & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $arm64Bin $arm64HostDll) -Architecture arm64 -Kind dll
     Write-Output 'Client build commands and PE architecture checks completed; no signing, packaging or installation performed.'
 } finally {
