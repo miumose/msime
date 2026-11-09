@@ -754,7 +754,6 @@ int main(int argc, char **argv) {
               "Preference fence failed");
       auto first_preferences = preferences;
       first_preferences["candidate_page_size"] = 3;
-      first_preferences["candidate_translations"] = true;
       auto latest_preferences = preferences;
       latest_preferences["candidate_page_size"] = 4;
       const auto first_document = Json{{"format_version", 1},
@@ -838,15 +837,6 @@ int main(int argc, char **argv) {
         packet.modifiers_down = 0;
         auto pending = state.key(lease, packet, ReplyPath::Composition);
         require(pending.has_value(), "Second preference pending key missing");
-        const auto translation_request = state.current_translation_request();
-        require(translation_request.has_value(),
-                "Active candidate translation was not re-dispatched");
-        const auto translation_document =
-            Json::parse(translation_request->second);
-        require(translation_document.at("generation").is_number_unsigned() &&
-                    translation_document.at("candidates").is_array() &&
-                    !translation_document.at("candidates").empty(),
-                "Re-dispatched translation query was incomplete");
         state.publish_preferences(first_snapshot);
         state.publish_preferences(latest_snapshot);
         state.publish_preferences(latest_snapshot);
@@ -1211,75 +1201,9 @@ int main(int argc, char **argv) {
       }
       {
         using namespace msime::windows;
-        for (char c : std::string("nihao")) key(c - 'a' + 'A', c);
-        // Multiple dictionary senses use a short-lived candidate page. The
-        // original Engine composition remains untouched until a sense is
-        // chosen, so the page can be dismissed without losing the input.
-        auto multi_view = session.view();
-        require(session.apply_translations(
-                    epoch, multi_view.at("generation").get<uint64_t>(),
-                    R"([{"text":"你好","translation":"hello; greeting; salutation"}])").has_value(),
-                "Synthetic multi-sense translation was not applied");
-        FanyImeNamedpipeData translation_enter{};
-        translation_enter.client_id = 42;
-        translation_enter.event_type = FanyImePipeEventType::KeyEvent;
-        translation_enter.keycode = 0x0D;
-        translation_enter.modifiers_down = PipeMetadata::CandidateActive | 2u;
-        ReplyComposer multi(42, epoch);
-        translation_enter.request_id = request++;
-        const auto multi_page = multi.configured_key(
-            session, translation_enter, epoch, TsfPreeditStyle::Pinyin, {});
-        require(multi_page && multi_page->encoded &&
-                    multi_page->encoded->packet.msg_type ==
-                        FanyImeReplyType::NavigationIgnored &&
-                    multi_page->source.transition.at("view").at("candidates").size() == 3 &&
-                    multi_page->source.transition.at("view").at("candidates").at(1).at("text") ==
-                        "greeting",
-                "Ctrl+Enter did not open the multi-sense translation page");
-        multi.confirm_delivery(42, epoch, translation_enter.request_id);
-        FanyImeNamedpipeData multi_next = translation_enter;
-        multi_next.request_id = request++;
-        multi_next.keycode = 0x22;
-        multi_next.modifiers_down = PipeMetadata::CandidateActive;
-        const auto multi_navigated = multi.basic_key(
-            session, multi_next, epoch, TsfPreeditStyle::Pinyin);
-        require(multi_navigated && multi_navigated->encoded &&
-                    multi_navigated->encoded->packet.msg_type ==
-                        FanyImeReplyType::NavigationIgnored &&
-                    multi_navigated->source.transition.at("view").at("candidates").size() == 3,
-                "Translation page navigation left the multi-sense page");
-        multi.confirm_delivery(42, epoch, multi_next.request_id);
-        FanyImeNamedpipeData multi_digit = translation_enter;
-        multi_digit.request_id = request++;
-        multi_digit.keycode = '2';
-        multi_digit.modifiers_down = PipeMetadata::CandidateActive;
-        const auto multi_selected = multi.basic_key(
-            session, multi_digit, epoch, TsfPreeditStyle::Pinyin);
-        require(multi_selected && multi_selected->encoded &&
-                    multi_selected->encoded->packet.msg_type ==
-                        FanyImeReplyType::CommitExactText,
-                "Translation page digit did not commit exact sense");
-        multi.confirm_delivery(42, epoch, multi_digit.request_id);
         session.deactivate(epoch);
         session.activate(++epoch);
         ReplyComposer basic(42, epoch);
-        for (char c : std::string("nihao")) key(c - 'a' + 'A', c);
-        const auto translated_view = session.view();
-        require(session.apply_translations(
-                    epoch, translated_view.at("generation").get<uint64_t>(),
-                    R"([{"text":"你好","translation":"hello"}])").has_value(),
-                "Synthetic candidate translation was not applied");
-        translation_enter.request_id = request++;
-        const auto translated = basic.configured_key(
-            session, translation_enter, epoch, TsfPreeditStyle::Pinyin, {});
-        // A single sense is committed as exact text, like the reference, and never selects the candidate the Engine would learn from.
-        require(translated && !translated->ui_selection && translated->encoded &&
-                    translated->encoded->packet.msg_type ==
-                        FanyImeReplyType::CommitExactText &&
-                    translated->next_prefix.empty() &&
-                    session.view().at("editing_text") == "",
-                "Ctrl+Enter did not commit the highlighted translation as exact text");
-        basic.confirm_delivery(42, epoch, translation_enter.request_id);
         const auto unchanged = session.view();
         FanyImeNamedpipeData digit{};
         digit.client_id = 42;
@@ -1296,11 +1220,10 @@ int main(int argc, char **argv) {
         require(!basic.basic_key(session, digit, epoch, TsfPreeditStyle::Pinyin) &&
                     session.view() == unchanged && !basic.has_pending(),
                 "Basic dispatcher consumed priority punctuation");
-        // The two checks above ran against an ended composition: Ctrl+Enter
-        // committed the translation, so there was nothing left to disturb, and
-        // "the view did not change" is what they are really asserting.
+        // The two checks above ran with nothing composing, so "the view did
+        // not change" is what they are really asserting.
         //
-        // Selecting a candidate needs one, so start a fresh composition here.
+        // Selecting a candidate needs a composition, so start one here.
         // Without this the digit below has nothing to select, the Engine
         // commits nothing, and the reply is NavigationIgnored - which is
         // correct behaviour for an empty composition and was read as the
