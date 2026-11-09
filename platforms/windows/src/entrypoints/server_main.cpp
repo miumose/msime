@@ -1002,6 +1002,10 @@ int wmain(int argc, wchar_t **argv) {
           if (feedback) hud_feedback.publish(std::move(*feedback), *route.route);
           return true;
         }, std::move(pump_presentation));
+    // 托盘和 TSF 的偏好写入方都已移除，但设置窗口是另一个进程直接改文件；
+    // Server 构造期间落盘的写入可能错过监视器回调，构造完再唤醒一次补查。
+    auto wake_preferences =
+        std::make_shared<std::pair<std::mutex, std::function<void()>>>();
     // Server 构造期间已可接收切换；安装与调用共用锁，异常展开也先撤销并等完旧回调。
     struct PreferenceWakeBinding {
       decltype(wake_preferences) &callback;
