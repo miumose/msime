@@ -1206,7 +1206,9 @@ if(WIN32)
   add_library(msime-windows-server STATIC src/system/WindowsServer.cpp src/candidate/CandidateWindow.cpp src/candidate/CandidateFlyoutWindow.cpp src/candidate/TrayMenuWindow.cpp)
   # Server 全程调用 *W API，资源宏（IDC_SIZEALL、RT_GROUP_ICON）也要取宽字符版本；
   # 这些源文件不在 msimeui 子目录里，拿不到那里的 UNICODE 定义。
-  target_compile_definitions(msime-windows-server PRIVATE UNICODE _UNICODE)
+  # windows.h 的 min/max 宏会破坏 std::max 和 std::numeric_limits<T>::max()，而 msimeui
+  # 只在它自己的子目录里定义 NOMINMAX，不会传播到这里，所以这里也要显式关掉。
+  target_compile_definitions(msime-windows-server PRIVATE UNICODE _UNICODE NOMINMAX)
   target_sources(msime-windows-server PRIVATE src/candidate/DesktopCandidates.cpp)
   add_executable(windows-desktop-candidates tests/ui/desktop_candidates.cpp)
   target_link_libraries(windows-desktop-candidates PRIVATE msime-windows-server)
