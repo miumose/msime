@@ -4931,7 +4931,7 @@ private:
       auto candidates_more = add_more_options(
           candidates, candidates_more_open_,
           focus_row_ == L"符号混输" || focus_row_ == L"颜文字混输" ||
-              focus_row_ == L"日文混输（实验）" || focus_row_ == L"只出单字" ||
+              focus_row_ == L"只出单字" ||
               focus_row_ == L"移动光标后编辑光标后的部分" ||
               focus_row_ == L"本地整句联想");
       // 符号混输是后加的可选键，默认开，文档里平时没有它，回退值必须是 true。

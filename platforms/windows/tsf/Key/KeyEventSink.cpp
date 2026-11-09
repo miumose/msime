@@ -1174,16 +1174,6 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             }
             return TRUE;
         }
-        // 方案由 Server 写进偏好，host-api 等这次组字结束、运行时空闲后才换方案，所以组字中按下不动组字，和托盘换方案一样。
-        if (!_serverUnavailableFallbackActive && IsJapaneseInputModeToggle(*pCodeOut, shortcutModifiers))
-        {
-            if (pKeyState)
-            {
-                pKeyState->Category = CATEGORY_COMPOSING;
-                pKeyState->Function = FUNCTION_TOGGLE_JAPANESE;
-            }
-            return TRUE;
-        }
         // Keep the Chinese compartment open: this only toggles the Server-owned English candidate sub-mode. Korean, Zhuyin and Vietnamese have no such mode here: the TIP composes them in its own host session, which would not follow a mode only the Server session entered, so the chord belongs to the application like any other Ctrl chord.
         if (!hostComposed && IsEnglishInputModeToggle(*pCodeOut, shortcutModifiers))
         {
@@ -1910,13 +1900,6 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
     {
         keyState->Category = CATEGORY_COMPOSING;
         keyState->Function = FUNCTION_TOGGLE_CHARACTER_SET;
-        return true;
-    }
-    if (projectedImeOpen && !_serverUnavailableFallbackActive && !_IsKeyboardDisabled() &&
-        IsJapaneseInputModeToggle(*classifiedCode, capturedModifiers))
-    {
-        keyState->Category = CATEGORY_COMPOSING;
-        keyState->Function = FUNCTION_TOGGLE_JAPANESE;
         return true;
     }
     // Korean, Zhuyin and Vietnamese have no Server-owned English candidate mode, as in _IsKeyEaten.
@@ -3415,12 +3398,6 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             // TestKeyDown owned this key. Do not send it as ordinary input.
             return KeyDownDispatchResult::Complete;
         }
-        // 同上：吃下这个键之后换上的旧 Server 不认识它，不能当普通按键送进组字。
-        if (KeystrokeState.Function == FUNCTION_TOGGLE_JAPANESE && !SupportsJapaneseToggleShortcut())
-        {
-            return KeyDownDispatchResult::Complete;
-        }
-
         // 日语转换开始之后的回车上屏 Server 高亮的候选（Global/JapaneseConversionPolicy.h）：按候选键处理并带上 CandidateActive，Server 走选中高亮候选的回车路径，TIP 读它的回复上屏，而不是自己宿主会话里的假名。
         const bool japaneseCandidateEnter =
             code == VK_RETURN && KeystrokeState.Category != CATEGORY_NONE && _IsComposing() &&

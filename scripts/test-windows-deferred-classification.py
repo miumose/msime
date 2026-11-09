@@ -779,7 +779,7 @@ def main() -> int:
     body = between(handler, "bool CMetasequoiaIME::_IsDeferredKeyOwnerCurrent(", "bool CMetasequoiaIME::_IsDeferredApplicationTextCurrent(")
     body += between(sink, "void CMetasequoiaIME::_EnsureDeferredKeyProjection()", "void CMetasequoiaIME::_ApplyDeferredPreservedKeyProjection(")
     body += between(sink, "void CMetasequoiaIME::_ArmDeferredRecoveryForTransport(", "bool CMetasequoiaIME::_ClassifyDeferredKeyDown(")
-    body += between(sink, "bool CMetasequoiaIME::_ClassifyDeferredKeyDown(", "//+---------------------------------------------------------------------------")
+    body += between(sink, "bool CMetasequoiaIME::_ClassifyDeferredKeyDown(", "\nnamespace\n{\n// 客户端进程是否以管理员身份运行")
     body += between(sink, "bool CMetasequoiaIME::_QueueDeferredKeyDown(", "bool CMetasequoiaIME::_QueueDeferredPreservedKey(")
     body += between(sink, "bool CMetasequoiaIME::_ResolveDeferredKeyClassification(", "//+---------------------------------------------------------------------------")
     with tempfile.TemporaryDirectory(prefix="msime-deferred-classification-") as directory:
