@@ -1204,6 +1204,9 @@ if(WIN32)
   # 通过真实共享布局桥验证图片工具栏与 GDI 窗口形状，不用手写的布局替身。
   add_subdirectory(tsf)
   add_library(msime-windows-server STATIC src/system/WindowsServer.cpp src/candidate/CandidateWindow.cpp src/candidate/CandidateFlyoutWindow.cpp src/candidate/TrayMenuWindow.cpp)
+  # Server 全程调用 *W API，资源宏（IDC_SIZEALL、RT_GROUP_ICON）也要取宽字符版本；
+  # 这些源文件不在 msimeui 子目录里，拿不到那里的 UNICODE 定义。
+  target_compile_definitions(msime-windows-server PRIVATE UNICODE _UNICODE)
   target_sources(msime-windows-server PRIVATE src/candidate/DesktopCandidates.cpp)
   add_executable(windows-desktop-candidates tests/ui/desktop_candidates.cpp)
   target_link_libraries(windows-desktop-candidates PRIVATE msime-windows-server)
