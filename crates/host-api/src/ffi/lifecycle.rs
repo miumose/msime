@@ -142,17 +142,10 @@ pub extern "C" fn msime_client_set_active(handle: u64, active: bool) -> bool {
     })
 }
 
-/// Write what would otherwise wait: the selection counts of every session on the calling thread, the typing-statistics commits the process holds for every directory, and every queued personal-context transition of the process. The C++ Engine wrote its queue from `atexit` (personal_ngram_store.cpp:254-255); a host that can exit without a focus-out or a destroy, such as macOS `[NSApp terminate:]`, calls this from its will-terminate hook on the thread that owns its sessions. Sessions stay usable.
+/// Write what would otherwise wait: the personal-learning transitions the process holds. A host that can exit without a focus-out or a destroy, such as macOS `[NSApp terminate:]`, calls this from its will-terminate hook. Sessions stay usable.
 #[no_mangle]
 pub extern "C" fn msime_client_flush_all() -> *mut c_char {
     response(|| {
-        SESSIONS.with(|sessions| {
-            // A reentrant call (from inside another host call on this thread) cannot reach the sessions; the Engine's queue is still written.
-            if let Ok(mut sessions) = sessions.try_borrow_mut() {
-                for session in sessions.values_mut() {
-                            }
-            }
-        });
         msime_engine::flush_personal_learning();
         Ok(Value::Null)
     })

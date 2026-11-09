@@ -15,14 +15,11 @@ use msime_client_core::host_surface::{
 use msime_client_services::dictionary::access::DictionaryAccess;
 /// 按用户的设置打一串键看候选，给 `msime-mcp candidates` 用。
 pub mod candidate_preview;
-pub mod settings_dictionary;
 pub mod system_fonts;
 use msime_client_core::preferences::{
-    CantoneseInputMethod, InputScheme, KoreanLayout, KoreanPreferences, MultilingualLanguage,
-    NineKeyShuangpinProfile, Preferences, PreferencesSnapshot, PreferencesStore,
-    ShuangpinCustomProfile, ShuangpinProfile, TouchKeyboardLayout, TouchKeyboardScheme,
-    TouchShuangpinLayout, TouchWubiLayout, VietnameseInputMethod, VietnamesePreferences,
-    VietnameseToneStyle, WubiProfile,
+    CantoneseInputMethod, InputScheme, KoreanLayout, KoreanPreferences, Preferences,
+    PreferencesSnapshot, PreferencesStore, ShuangpinCustomProfile, ShuangpinProfile,
+    TouchKeyboardScheme, VietnameseInputMethod, VietnamesePreferences, VietnameseToneStyle,
 };
 use msime_client_core::punctuation::{
     route as punctuation_route, PunctuationContext, PunctuationRoute,
@@ -37,36 +34,20 @@ use msime_engine::{
     SchemeType, ShuangpinCustomProfileError, ShuangpinCustomTable, ShuangpinCustomTablePart,
     ShuangpinProfileKind,
 };
-#[cfg(unix)]
-use msime_input_runtime::TranslationQuery;
-#[cfg(unix)]
-use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
-    Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, GlideKeyboard, GlidePoint,
-    OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
+    Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, OnlineCandidate, OnlineQuery,
+    Reranker, Runtime, SentenceModel, Transition,
 };
-use msime_input_runtime::EmojiPanelQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-// Only the Unix socket streaming entry point takes raw callback context.
-#[cfg(unix)]
-use std::ffi::c_void;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-/// `msime_client_account` 在 #8201 新增的操作。
 mod bounded_file;
 mod chinese_english_spacing;
-/// 多分类自动云同步的驱动；C 入口在 `ffi::cloud_sync`。与 `cloud_dictionary` 一样和 C 入口模块同名，所以公开，免得遮住 `ffi` 的同名模块。
-mod dictionary;
-/// 「我的词条」经 WebDAV 网盘同步的宿主入口，见 `msime_client_dictionary_sync`。公开 [`dictionary_webdav::request_json`]，给直接链接这个 crate 的 Tauri 设置应用用，免得它绕一圈 C ABI。
-/// 同一台设备上两个各有一份个人词库的进程之间交换「我的词条」，见 `msime_client_user_words_mirror`。
-// The exports live in `ffi`, but Rust consumers - this crate's own tests and
-// examples, and anything linking the rlib - have always reached them at the
-// crate root. Re-exported so moving the file changes no caller.
 /// Largest preference document a host may hand to the C ABI, in bytes.
 ///
 /// A valid document carries the custom touch-keyboard skin, whose photo alone may be 682,668 base64 characters; at the 16 KiB every other buffer uses, a document holding a photo could never be written back, which failed every later preference write from that host.
@@ -75,10 +56,6 @@ pub(crate) const PREFERENCES_DOCUMENT_LIMIT: usize = 1 << 20;
 /// Preferences may carry a base64 custom keyboard photo, so the old 16 KiB
 /// ABI limit rejected valid saved preferences before a session could start.
 pub(crate) const HOST_OPTIONS_DOCUMENT_LIMIT: usize = PREFERENCES_DOCUMENT_LIMIT;
-/// Largest dictionary-management request: one HostOptions document plus the
-/// bounded personal-dictionary import payload and a small amount of framing.
-pub(crate) const DICTIONARY_REQUEST_LIMIT: usize = HOST_OPTIONS_DOCUMENT_LIMIT + 1_200_000;
-
 pub(crate) fn valid_sha256(value: &str) -> bool {
     msime_client_core::is_ascii_hex(value, 64)
 }
@@ -150,17 +127,8 @@ fn host_ai_candidate_limit(stored: u8) -> u8 {
         .fixed_ai_candidate_limit()
         .unwrap_or(stored)
 }
-mod pronunciation;
-pub use dictionary::{
-    dictionary_request_json, dictionary_words, edit_dictionary_word, edit_user_quick_phrase,
-    import_dictionary_words, lookup_candidates, msime_client_dictionary,
-    msime_client_dictionary_import_entries, msime_client_dictionary_scel_text,
-    msime_client_dictionary_validate, msime_client_personal_dictionary_request,
-    msime_client_personal_dictionary_sync, personal_dictionary_request_json, scel_text_json,
-    user_quick_phrases, CandidateOrigin, DictionaryOptions, LookupCandidate, LookupScheme, NewWord,
-    QuickPhrase, QuickPhraseEdit, QuickPhrasePage, Word, WordEdit, WordImport, WordKind, WordPage,
-};
 mod diagnostics;
+mod pronunciation;
 pub use diagnostics::{msime_client_set_diagnostic_sink, DiagnosticSink};
 mod dictionary_updates;
 mod key_sound;
@@ -886,7 +854,7 @@ impl HostSession {
                 .clear_online_candidates(0)
                 .map_err(|e| e.to_string())?;
         }
-        let previous_preferences = self
+        let _previous_preferences = self
             .requested
             .as_ref()
             .map_or(&self.applied, |previous| &previous.preferences);
@@ -938,8 +906,9 @@ impl HostSession {
         // 「二三候选」键也是宿主编排状态：跟着最新请求的偏好走，下一键生效。
         self.runtime
             .set_second_third_candidate(requested_preferences.second_third_candidate);
-        self.sound
-            .update(key_sound::SoundSettings::new(&requested_preferences.plugins));
+        self.sound.update(key_sound::SoundSettings::new(
+            &requested_preferences.plugins,
+        ));
         self.requested_settled = true;
         let fallback = self.apply_pending()?;
         Ok(self.preferences_response(fallback))
@@ -947,7 +916,7 @@ impl HostSession {
 
     /// `update` 收到与上一份逐字相同的快照：只做可能因别处改动而需要重做的事，回复与完整更新相同。
     fn update_unchanged(&mut self) -> Result<Value, String> {
-        let snapshot = self.requested.as_ref().expect("requested snapshot exists");
+        let _snapshot = self.requested.as_ref().expect("requested snapshot exists");
         // 设置页可能重新导入或删掉了正在用的音效包、效果包：只给清单盖戳，戳变了才重读效果包，和完整更新里新建的设置结果相同。
         self.sound.restamp();
         // 组字结束后待应用的偏好、资源包和落定重排模型仍在这里换上。
@@ -1138,7 +1107,6 @@ fn apply_shuangpin_profile(
         }
     }
 }
-
 
 /// 交给 Engine 的 `enabled_schemes`：本版本提供的拼音方案。
 fn engine_schemes(edition: &Edition) -> SchemeSet {
@@ -1808,10 +1776,7 @@ pub(crate) fn report_settled_model(
         }
         (None, Some(state_root)) => diagnostics::report(
             "settled model missing",
-            &format!(
-                "no settled-model pack under {}",
-                state_root.display()
-            ),
+            &format!("no settled-model pack under {}", state_root.display()),
         ),
         (None, None) => diagnostics::report(
             "settled model missing without state directory",
@@ -2569,88 +2534,6 @@ fn with_installed_language_dictionaries(
     Ok(Some(refreshed))
 }
 
-/// The reason prefix for an entry this layer or the Engine refuses on its own terms. Callers map it to one error code, so it stays stable while the part after the colon says which rule failed.
-pub const INVALID_DICTIONARY_ENTRY: &str = "invalid dictionary entry";
-
-pub(crate) fn invalid_dictionary_entry(reason: &str) -> String {
-    format!("{INVALID_DICTIONARY_ENTRY}: {reason}")
-}
-
-/// 本版本没有中文词库时编辑拼音、五笔或快捷短语的拒绝原因。
-pub(crate) const NO_CHINESE_DICTIONARY: &str =
-    "this edition of the input method has no Chinese dictionary; only English words can be edited";
-
-/// `kind` 的词能不能在 `options` 的版本里编辑。不含全拼、双拼、五笔的版本（日文、越南文、藏文）随包不带 msime-pinyin.db，拼音、五笔和快捷短语都无处可存，只有英文词和粤语词（粤语词只记在用户日志里）能编辑（`SchemeSet::reads_main_dictionary`）。在加锁之前就拒绝，把原因告诉调用方，而不是让 Engine 拒绝后报成笼统的「dictionary edit rejected」。
-pub(crate) fn require_dictionary_kind(
-    options: &EngineOptions,
-    kind: msime_engine::host::DictionaryKind,
-) -> Result<(), String> {
-    if kind.stored_without_main_dictionary() || options.enabled_schemes.reads_main_dictionary() {
-        Ok(())
-    } else {
-        Err(NO_CHINESE_DICTIONARY.into())
-    }
-}
-
-/// Edit only after every participating host has destroyed its sessions.
-/// Busy is retryable without cancelling any composition. The host must recreate
-/// sessions after success; no native/Tauri management command is exposed yet.
-///
-/// An entry the Engine refuses is reported as `invalid dictionary entry: <reason>` with the Engine's reason, checked before anything is locked. Those reasons are fixed sentences in `validate_personal_dictionary_entry` that never repeat the submitted entry; collapsing them into one generic "rejected" left the settings page telling the user to retry an entry that could never be saved. Every other Engine diagnostic is still withheld, since it may include user text.
-pub fn edit_personal_dictionary(
-    options: &EngineOptions,
-    previous: Option<&msime_engine::host::DictionaryEntry>,
-    replacement: Option<&msime_engine::host::DictionaryEntry>,
-    request_id: &str,
-) -> Result<(), String> {
-    validate_personal_dictionary_edit(options, previous, replacement, request_id)?;
-    let access = DictionaryAccess::try_maintenance(
-        std::path::Path::new(&options.user_data),
-        std::path::Path::new(&options.dictionaries),
-    )
-    .map_err(|_| "dictionary access unavailable")?
-    .ok_or("dictionary maintenance busy")?;
-    edit_personal_dictionary_with_access(&access, options, previous, replacement, request_id)
-}
-
-/// 在调用方持有维护租约时校验并应用一个词条改动。
-/// 租约按借用传入，让有界批次共用一个独占窗口，不必为每个待处理词条重新取锁。
-pub(crate) fn edit_personal_dictionary_with_access(
-    _access: &DictionaryAccess,
-    options: &EngineOptions,
-    previous: Option<&msime_engine::host::DictionaryEntry>,
-    replacement: Option<&msime_engine::host::DictionaryEntry>,
-    request_id: &str,
-) -> Result<(), String> {
-    validate_personal_dictionary_edit(options, previous, replacement, request_id)?;
-    msime_engine::host::dictionary_edit(options, previous, replacement, request_id)
-        .map_err(|_| "dictionary edit rejected".into())
-}
-
-fn validate_personal_dictionary_edit(
-    options: &EngineOptions,
-    previous: Option<&msime_engine::host::DictionaryEntry>,
-    replacement: Option<&msime_engine::host::DictionaryEntry>,
-    request_id: &str,
-) -> Result<(), String> {
-    for entry in previous.iter().chain(replacement.iter()) {
-        require_dictionary_kind(options, entry.kind)?;
-    }
-    // The previous row is one the list returned, whose weight learning may have lifted past the ceiling a new entry is held to.
-    for entry in previous.iter() {
-        msime_engine::host::dictionary_validate_previous(entry)
-            .map_err(|error| invalid_dictionary_entry(&error.to_string()))?;
-    }
-    for entry in replacement.iter() {
-        msime_engine::host::dictionary_validate(entry)
-            .map_err(|error| invalid_dictionary_entry(&error.to_string()))?;
-    }
-    if request_id.is_empty() {
-        return Err("dictionary request id required".into());
-    }
-    Ok(())
-}
-
 /// A host-owned view of one entry in the verified local Emoji catalog.
 #[derive(Clone, Debug, Serialize)]
 pub struct LocalEmojiCatalogItem {
@@ -2869,4 +2752,3 @@ fn dispatch_value(
         Ok(value)
     })
 }
-

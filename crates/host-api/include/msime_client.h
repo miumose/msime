@@ -95,50 +95,6 @@ char *msime_client_refresh_host(const uint8_t *path, size_t length);
  */
 char *msime_client_create(const uint8_t *options, size_t length);
 
-/* Management JSON (<=2248576 bytes), trusted native caller only:
- * {options: <same HostOptions as create>, action: {operation:"list",offset:0,limit:100}}
- * List 的 kind 与 query 可选：ASCII 查询匹配编码前缀，含非 ASCII 字符时匹配词条字面内容。无查询时列个人词条；指定 kind 与非空查询时包含内置行，quick_phrase 空查询也包含内置行。个人行优先；user_only:true 始终只列个人词条，在整库筛选后分页。
- * or action:{operation:"edit",previous:null|Entry,replacement:null|Entry,request_id:"..."}.
- * 批量导入：action:{operation:"import",kind:"pinyin"|"wubi"|"wubi98"|"wubixsj"|"quick_phrase"|"english"|"cantonese",
- * format:"standard"|"windows"|"rime"|"hans",text:"word<TAB>code<TAB>weight\\n",request_id:"..."}.
- * Standard rows are word, code, weight; Windows rows are code, word, weight. Rime rows are
- * word, code, optional weight and may include YAML front matter between --- and ...; Rime's
- * metadata weights (for example c=3 d=0.12) use the default 10000. Omitted weights use 10000.
- * The hans format is pinyin-only and accepts one pure Han phrase per line; Engine resolves
- * each phrase to its highest-ranked canonical pinyin and uses weight 10000.
- * Import accepts at most 1000 rows and returns {applied}; rows are committed
- * with deterministic receipt IDs derived from request_id so retries are safe.
- * Export: action:{operation:"export",kind,format:"standard"|"windows",offset,limit} returns
- * {text,has_more}; use pages of at most 1000 rows. Standard output is word, code, weight.
- * 词条结构：{kind:"pinyin"|"wubi"|"wubi98"|"wubixsj"|"quick_phrase"|"english"|"cantonese",key,value,weight,source?:"user"|"bundled"}。`wubixsj` 是新世纪五笔。
- * 粤语（cantonese）只有用户自己的词：key 是粤拼音节，空格或 ' 分隔、可带声调数字 1–6，Engine 去掉声调、收成单个空格分隔后存进日志，粤语方案查词时并进候选。list、count、export、edit、import 都认它；browse 的 kind:"cantonese" 仍指发布的粤语词库（只读）。云词库和词库快照不收粤语词。
- * List returns {entries,has_more} and sets source on every entry; edit returns {applied:true}. Errors are redacted.
- * A bundled entry passed back as previous can only be re-weighted (replacement with the same kind, key and value) or deleted (replacement null); anything else fails with "bundled dictionary entry is read-only". Export of pinyin also carries the weights set or learned for bundled words and omits single characters; the other kinds export user words only.
- * 清除学习记录：action:{operation:"reset"} 取独占维护权（会话开着时报 dictionary maintenance busy），换回随包的工作词库和英文词库、清空日志（调频、置顶、固定位置、选词计数、整句联想、拼写纠错和用户自己的词），偏好、常用语、剪贴板和打字统计不动；options 带 preferences_directory 时先删掉那里还没合并的输入记录和输入习惯（pending-learning-merge 和 pending-habits-merge 的待合并、已认领和失败计数文件，删不掉时报 learned-data reset rejected、什么也没清），重置后再把已启用命名词库的词重新排进它们的待发送队列（`DictionaryCollectionsStore::requeue_enabled_after_reset`），宿主随后照常送出。返回 {reset:true,collections_requeued:n}；重置成功而重排失败时照样是 reset:true，collections_requeued 为 null，另带 collections_error:"learned-data reset collections unavailable"。云同步的待上传标记由宿主自己打（Android 用 msime_client_cloud_sync 的 dictionary_reset）。
- * 计数（只读）：action:{operation:"count",kind?,user_only?:bool} 返回 {count,kinds:{kind:n},complete}；user_only:true 只数用户自己的词，否则拼音还会数上学到或设过权重的随包词（也就是导出的那些行）。扫描在 1,000,000 行处停下时 complete 为 false。
- * 快照导出：action:{operation:"export_snapshot",destination:绝对路径,include_learning?:bool} 把用户的词写成与 GET /v1/users/me/dictionary/snapshot 相同的 NDJSON msime-dictionary-snapshot v1 文档（header、每个词一条 entry 和一条 overlay、带正文 SHA-256 的 footer；revision 为 1），用云端格式自己的校验器检查后返回那份元数据加上 path。不需要账号。include_learning 缺省为 false，这时不含位置和选择，也不含新世纪五笔（wubixsj）的词（服务端还不收这个种类），云同步上传用的就是它；为 true 时（本地备份用）在用户的词之后再写输入记录：学习调权写成 user_inserted:false 的 overlay、删除记录写成 deleted:true 的 overlay、固定位置写成 position、选词计数写成 selection（截到 0..10），格式装不下的行跳过，返回值多出 learning 和 learning_skipped 两个计数；日志整体读不出来时照样导出词，learning 为 0，原因在 learning_error。
- * 输入记录：action:{operation:"learning_count"} 只读，返回 {count}，即本机日志里学习调权、删除记录、固定位置和选词计数的条数（不含用户自己的词）。action:{operation:"queue_learning_merge",source:绝对路径} 校验快照文件 source，把其中的输入记录另存成 <preferences_directory>/pending-learning-merge.ndjson（替换已有的一份），返回 {queued,learning}；没有输入记录时 queued 为 false、什么也不写。action:{operation:"merge_pending_learning"} 在没有会话时合并这份文件（要独占维护权，忙时报 dictionary maintenance busy、文件留着）：本机已有的词、固定的词和被占用的位置保留本机，选词计数取较大的那个，返回 {merged:false}（没有待合并的）或 {merged:true,entries,positions,selections,kept,skipped}；合并期间新排的一份不受影响，连续失败三次放弃并删掉文件（learning merge abandoned）。
- * 本地备份的校验与输入习惯：action:{operation:"inspect_snapshot",source:绝对路径} 只读地按云端格式完整校验一份词库快照并返回它的元数据。action:{operation:"export_habits",destination:绝对路径} 把日志里的输入习惯（整句联想的二元/三元计数、连续选词对、拼写纠错计数、自动纠错抑制、置顶的候选）写成 NDJSON（header format:"msime-learning-habits" version:1、每条一行、footer 带条数和正文 SHA-256），装不下的行跳过，返回 {path,habits,skipped}。action:{operation:"inspect_habits",source} 只读校验，返回 {habits}。action:{operation:"queue_habits_merge",source} 校验后存成 <preferences_directory>/pending-habits-merge.ndjson，返回 {queued,habits}；merge_pending_learning 随后在空闲时一并合并它（计数取大、置顶保留本机，写完压回各表上限），结果多一个 habits 字段。learning_count 另返回 habits（输入习惯行数，读不出来时为 null）。
- * 五笔查码（只读）：action:{operation:"wubi_codes",text} 返回 {phrase,characters,truncated}。characters 按 text 里第一次出现的顺序列出每个不同的汉字（最多 64 个，超出时 truncated 为 true），每项是 {text,wubi86:[...],wubi98:[...],wubixsj:[...]}，编码短码在前、码表里没有时为空数组（词库里还没有新世纪表时 wubixsj 总是空数组；更早的版本没有这个键）；phrase 是整段文字作为一个词的同样一项，只在整段都是汉字、2 到 16 个字、且至少一张表有它时给出，否则为 null。读会话用的同一份五笔码表，不拿维护权；text 超过 4096 字节时报 invalid wubi lookup。msime_client_personal_dictionary_request 对它给出同样的回答，不进队列。
- * Native host owns/authorizes paths; never accept arbitrary webview paths or log payloads.
- * Run on a worker thread. Edit returns busy until all participating sessions are
- * destroyed, then holds exclusive access; recreate sessions after success.
- * Do not automatically cancel user input to obtain access. Retry ambiguous writes
- * with the identical nonempty request ID and content.
- */
-char *msime_client_dictionary(const uint8_t *request, size_t length);
-
-/* The same {options, action} as msime_client_dictionary, as a settings page sends it: an edit,
- * import or reset first has the input hosts let go of the dictionaries (the Windows Server
- * over its auxiliary pipe) and is retried until they have; an import of a whole file (up to
- * 48 MiB of text) is sent in batches and answered with one report; and a refusal's error is
- * the settings pages' code: dictionary_busy, dictionary_too_large, dictionary_import_rejected,
- * dictionary_read_rejected, dictionary_pinyin_unavailable, dictionary_unavailable,
- * dictionary_reset_rejected, dictionary_bundled_readonly, dictionary_invalid_entry,
- * dictionary_invalid_word or storage. {operation:"reset"} restores the bundled dictionaries
- * and clears all learned data, returning {reset:true}. Blocks: call off the UI thread. */
-char *msime_client_settings_dictionary(const uint8_t *request, size_t length);
-
 /* Smart punctuation follow-up gestures. The host holds the snapshots: they belong
  * to its editor, not to Engine, and a session rebuilt while the keyboard was away
  * must not carry a gesture across the gap. The switches that gate them live in the
@@ -155,26 +111,6 @@ char *msime_client_settings_dictionary(const uint8_t *request, size_t length);
 char *msime_client_smart_punctuation_arm(uint64_t handle, const uint8_t *request, size_t length);
 
 char *msime_client_smart_punctuation_decide(uint64_t handle, const uint8_t *request, size_t length);
-
-/* Pure Engine validation/normalization for one Entry object. No paths or
- * session are required and no dictionary state is changed. */
-char *msime_client_dictionary_validate(const uint8_t *request, size_t length);
-
-/* Plain Chinese words, one per line, answered as the pinyin entries the "hans" import format would produce: {entries:[Entry]}. Reads only the packaged main dictionary under resources, read-only; needs no prepared host or session and changes no dictionary state. */
-char *msime_client_dictionary_hans_entries(const uint8_t *text, size_t text_length,
-                                           const uint8_t *resources, size_t resources_length);
-
-/* 搜狗细胞词库（.scel）转成标准 TSV 文本：请求 {bytes_base64}（文件不超过 8 MiB），回答 {name, category, entries, text}。text 每个词一行（词<TAB>音节'音节，不带权重列），读不出读音或词的那一行必定被导入拒绝，所以导入报告里的行号就是词序；宿主把 text 当作 standard 格式交给自己现有的导入。纯函数：不需要宿主选项，不碰任何词库状态，不记录词条内容。错误：dictionary_scel_unsupported（不是细胞词库或版本不支持）、dictionary_scel_malformed（不完整或已损坏）、dictionary_scel_empty、dictionary_too_large、dictionary_scel_invalid（请求或 base64 坏了）。 */
-char *msime_client_dictionary_scel_text(const uint8_t *request, size_t length);
-
-/* A dictionary file ({kind, format, text}, as the "import" dictionary action) answered as the words the personal dictionary queue accepts, with the import report: {entries:[Entry], applied, failed, truncated, swapped, first_failures}. Invalid rows are counted with their line, repeated words appear once, and at most 128 words are returned. Reads only the packaged main dictionary under resources; changes no dictionary state. Maximum 1,200,000 bytes. */
-char *msime_client_dictionary_import_entries(const uint8_t *request, size_t request_length,
-                                             const uint8_t *resources, size_t resources_length);
-
-/* 个人词库队列同步：请求是与 msime_client_create 相同的 HostOptions。
- * 一次最多应用 128 项，返回 {synchronized,pending_count,failed_count,snapshot_error,applied_count}；applied_count 是 Engine 确认已应用的 Written 请求数，含幂等重试，不计 AlreadyPresent 或失败项。
- * 整批先取得维护租约；词库仍有活跃会话时返回 dictionary maintenance busy，队列保持原样，稍后重试。 */
-char *msime_client_personal_dictionary_sync(const uint8_t *request, size_t length);
 
 /* The shared preference defaults as a JSON document. A host patching one key of
  * a nested preference object needs that object's other fields: the object itself
@@ -231,22 +167,6 @@ char *msime_client_check_toggle_hotkey(const uint8_t *request, size_t length);
 
 /* 列出自定义辅助码表。resources 是绝对的 Engine 资源目录；state_root 是绝对的状态根（HostOptions 的 preferences_directory），没有时传 NULL 和 0。两处的 helpcodes/custom 合起来按主干排序，同一主干取状态根那份（用户自己的表放在状态根下，升级不会动它；资源目录是安装包或词库代次，是以前的位置），与 Engine 读表的顺序一致。value 是 {schema,file_stem,name,name_en} 的数组，目录不在或读不了时是空数组。显示名取开头的 # name: 和 # name_en: 注释，码表本身仍由 Engine 解析。 */
 char *msime_client_helpcode_schemas(const uint8_t *resources, size_t length, const uint8_t *state_root, size_t state_root_length);
-
-/* The queued personal dictionary, for a host that cannot take the Engine's
- * maintenance lock when the request arrives. Same request shape as
- * msime_client_dictionary - {options,action} - but the operations act on
- * <preferences_directory>/PersonalDictionary instead of the Engine, and the
- * keyboard applies them at its next session start. Use this for import_personal
- * in particular: "maintenance busy" is not an answer to "add these words", and
- * the user is as likely to import with the keyboard up as with it down. */
-char *msime_client_personal_dictionary_request(const uint8_t *request, size_t length);
-
-/* Absolute staged engine resources; returns {profile,sourceCommit} from the
- * packaged msime-dictionary-manifest.json. Two fields only: the page is asking what
- * dictionary is installed and where it came from, not for journal modes or
- * third-party references. Missing or unreadable is reported, never guessed -
- * showing the wrong dictionary version is worse than showing none. */
-char *msime_client_dictionary_manifest(const uint8_t *resources, size_t length);
 
 /* Same validation as load_preferences; ok:true,value:null means lock busy.
  * Does not wait for the writer lock. Disk I/O may still block: use a worker.

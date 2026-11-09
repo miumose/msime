@@ -3,13 +3,11 @@
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
 use crate::*;
-use msime_client_core::is_bounded_text;
 
 /// Candidate and commit text normally stays far below this bound. Keep the direct conversion ABI
 /// bounded as well so a malformed native length cannot make it scan an unbounded buffer or allocate
 /// an arbitrarily large converted string.
 const MAX_TRADITIONAL_CONVERSION_BYTES: usize = 1 << 20;
-
 
 #[no_mangle]
 pub extern "C" fn msime_client_abi_version() -> u32 {
@@ -257,7 +255,6 @@ pub unsafe extern "C" fn msime_client_refresh_host(path: *const u8, length: usiz
     })
 }
 
-
 /// The shared preference defaults, as the document a host would have to produce.
 ///
 /// A host that patches one key into a nested preference object needs the rest of
@@ -302,7 +299,6 @@ pub(crate) fn compiled_platform() -> HostPlatform {
         HostPlatform::Linux
     }
 }
-
 
 /// 「重置所有设置」：在偏好锁里读出当前文档，换成本存储所属版本的默认偏好（服务凭据和 `fuzzy_pinyin.seeded` 保留，见 `Preferences::restored_to_defaults_for`），再按 `expected_revision` 比较并交换写回，返回新的快照。修订号不符时以 `preferences changed; reload before saving` 失败，什么也不写。词库、统计和剪贴板历史不受影响；默认关闭剪贴板历史时与保存偏好一样清空已存的历史。
 /// # Safety
@@ -673,8 +669,6 @@ fn toggle_hotkey_chord(chord: Option<msime_client_core::key_chord::KeyChord>) ->
     })
 }
 
-
-
 /// 列出自定义辅助码表：状态根和资源目录两处的 `helpcodes/custom`，规则见 [`crate::list_custom_helpcode_schemas`]。原生设置界面和共享设置页用同一份元数据，码表本身仍由 Engine 解析。目录不在时是空列表，不算错。
 /// # Safety
 /// `resources` points to `length` readable UTF-8 bytes naming an absolute resource directory; null is rejected. `state_root` is null (with `state_root_length` 0) or points to `state_root_length` readable UTF-8 bytes naming the absolute state root (HostOptions `preferences_directory`). The returned JSON must be released with `msime_client_string_free`.
@@ -710,73 +704,6 @@ struct SkinPackageRequest {
     directory: String,
     id: String,
 }
-
-
-/// What dictionary is installed, for the settings page to show.
-///
-/// The packaged dictionary ships with a manifest naming which specification it
-/// was built to and which upstream commit it came from. Apple's settings read
-/// it straight out of the app bundle; a host whose resources are staged into a
-/// sandbox cannot, and the path is not something a settings page should be
-/// told anyway.
-///
-/// Only two fields come back. The manifest also records journal modes, format
-/// contracts and every third-party reference, none of which answers the
-/// question the page is asking — which is "what do I have, and where did it
-/// come from". A missing or unreadable manifest is reported rather than
-/// guessed at: showing the wrong dictionary version is worse than showing
-/// none.
-/// # Safety
-/// `resources` points to `length` readable UTF-8 bytes. Null is rejected.
-#[no_mangle]
-pub unsafe extern "C" fn msime_client_dictionary_manifest(
-    resources: *const u8,
-    length: usize,
-) -> *mut c_char {
-    #[derive(Deserialize)]
-    struct Source {
-        commit: String,
-    }
-    #[derive(Deserialize)]
-    struct Manifest {
-        profile: String,
-        source: Source,
-    }
-    response(|| {
-        if resources.is_null() || length > 16384 {
-            return Err("dictionary_manifest_unavailable".into());
-        }
-        // SAFETY: guaranteed by the documented caller contract.
-        let bytes = unsafe { std::slice::from_raw_parts(resources, length) };
-        let directory =
-            std::str::from_utf8(bytes).map_err(|_| "dictionary_manifest_unavailable")?;
-        let path = Path::new(directory);
-        if !path.is_absolute() {
-            return Err("dictionary_manifest_unavailable".into());
-        }
-        // Bounded before parsing: this is a packaged file, and one that has grown to megabytes is
-        // not a manifest whatever it parses as.
-        let file = path.join("msime-dictionary-manifest.json");
-        let bytes = crate::bounded_file::read(
-            crate::bounded_file::open_private(&file)
-                .map_err(|_| "dictionary_manifest_unavailable")?,
-            1024 * 1024,
-        )
-        .map_err(|_| "dictionary_manifest_unavailable")?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| "dictionary_manifest_unavailable")?;
-        let manifest: Manifest =
-            serde_json::from_str(text).map_err(|_| "dictionary_manifest_unavailable")?;
-        if manifest.profile.is_empty()
-            || !is_bounded_text(&manifest.profile, 64)
-            || !msime_client_core::is_ascii_hex(&manifest.source.commit, 40)
-        {
-            return Err("dictionary_manifest_unavailable".into());
-        }
-        Ok(json!({"profile": manifest.profile, "sourceCommit": manifest.source.commit}))
-    })
-}
-
-
 
 /// Try to read preferences without waiting for the writer lock.
 /// # Safety
@@ -948,4 +875,3 @@ pub unsafe extern "C" fn msime_client_save_preferences(
         serde_json::to_value(saved).map_err(|e| e.to_string())
     })
 }
-
